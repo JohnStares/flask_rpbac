@@ -16,3 +16,8 @@ __pycache__
 # Dev flask test samples
 test_sample.py
 test_blueprint.py
+
+# Pytest / coverage reports
+.coverage
+coverage.xml
+htmlcov
