@@ -1,0 +1,57 @@
+requires = ["tox>=4.21"]
+env_list = [
+    "py312-flask31",
+    "py313-flask31",
+    "py314-flask31",
+    "coverage-report",
+]
+skip_missing_interpreters = true
+
+[env_run_base]
+package = "skip"
+set_env = { PYTHONPATH = "{toxinidir}", COVERAGE_FILE = ".coverage.{envname}" }
+deps = [
+    "pytest",
+    "pytest-cov",
+    "click",
+]
+commands = [
+    [
+        "pytest",
+        "{posargs:tests/}",
+        "--cov=src/flask_rpbac",
+        "--cov-report=",
+    ],
+]
+
+[env.py312-flask31]
+base_python = "python3.12"
+deps = ["pytest", "pytest-cov", "flask>=3.1"]
+
+
+[env.py313-flask31]
+base_python = "python3.13"
+deps = ["pytest", "pytest-cov", "flask>=3.1"]
+
+
+[env.py314-flask31]
+base_python = "python3.14"
+deps = ["pytest", "pytest-cov", "flask>=3.1"]
+
+
+[env.coverage-report]
+depends = [
+    "py312-flask31",
+    "py313-flask31",
+    "py314-flask31",
+]
+package = "skip"
+skip_install = true
+set_env = { COVERAGE_FILE = ".coverage" }
+deps = ["coverage[toml]"]
+commands = [
+    ["coverage", "combine"],
+    ["coverage", "report", "--fail-under=90", "-m"],
+    ["coverage", "html"],
+    ["coverage", "xml"],
+]

@@ -20,4 +20,5 @@ test_blueprint.py
 # Pytest / coverage reports
 .coverage
 coverage.xml
-htmlcov
+htmlcov/
+.tox/
