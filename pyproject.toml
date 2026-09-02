@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "Flask-RPBAC"
 version = "0.1.dev0"
-authors = [{name = "John Stares", email = "wisdomachor24@gmail.com"}]
+authors = [{name = "John Stares", email = "wisdom8achor24@gmail.com"}]
 requires-python = ">=3.12"
 description = "Flask-RPBAC is a lightweight role- and permission-based access control extension for Flask."
 license = "MIT"
