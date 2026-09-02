@@ -35,8 +35,8 @@ dev = [
 ]
 
 [project.urls]
-Repository = "https://github.com/JohnStares/flask-rpbac.git"
-"Bug Tracker" = "https://github.com/JohnStares/flask-rpbac/issues"
+Repository = "https://github.com/JohnStares/flask_rpbac.git"
+"Bug Tracker" = "https://github.com/JohnStares/flask_rpbac/issues"
 
 [tool.setuptools.packages.find]
 where = ["src"]
