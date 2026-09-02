@@ -3,6 +3,7 @@ env_list = [
     "py312-flask31",
     "py313-flask31",
     "py314-flask31",
+    "docs",
     "coverage-report",
 ]
 skip_missing_interpreters = true
@@ -39,11 +40,25 @@ base_python = "python3.14"
 deps = ["pytest", "pytest-cov", "flask>=3.1"]
 
 
+[env.docs]
+base_python = "python3.12"
+package = "skip"
+changedir = "docs"
+deps = [
+    "sphinx",
+    "flask_sphinx_themes",
+    "flask>=3.1",
+    "click",
+]
+commands = [["sphinx-build", "-b", "html", "source", "build/html"]]
+
+
 [env.coverage-report]
 depends = [
     "py312-flask31",
     "py313-flask31",
     "py314-flask31",
+    "docs",
 ]
 package = "skip"
 skip_install = true
