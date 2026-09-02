@@ -1,0 +1,78 @@
+[build-system]
+requires = ["setuptools >= 77.0.3"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "Flask-RPBAC"
+version = "0.1.dev0"
+authors = [{name = "John Stares", email = "wisdomachor24@gmail.com"}]
+requires-python = ">=3.12"
+description = "Flask-RPBAC is a lightweight role- and permission-based access control extension for Flask."
+license = "MIT"
+readme = "README.md"
+keywords = ["RBAC", "RPBAC", "Role", "Permission", "Authorization"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Web Environment",
+    "Intended Audience :: Developers",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Programming Language :: Python",
+    "License :: MIT License",
+    "Operating System :: OS Independent"
+]
+dependencies = [
+    "Flask>=3.1.0"
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=9",
+    "pytest-cov>=7",
+    "tox>=4",
+    "sphinx",
+    "flask-sphinx-themes",
+    "click",
+]
+
+[project.urls]
+Repository = "https://github.com/JohnStares/flask-rpbac.git"
+"Bug Tracker" = "https://github.com/JohnStares/flask-rpbac/issues"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.coverage.run]
+source = ["src/flask_rpbac"]
+branch = true
+omit = [
+    "*/site-packages/*",
+    "*/tests/*",
+    "*/__pycache__/*",
+    "*test_*.py",
+]
+
+[tool.coverage.report]
+fail_under = 90
+show_missing = true
+skip_covered = false
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+    "def __repr__",
+]
+
+[tool.coverage.html]
+directory = "htmlcov"
+
+[tool.coverage.xml]
+output = "coverage.xml"
+
+[tool.pytest.ini_options]
+addopts = [
+    "--cov=src/flask_rpbac",
+    "--cov-report=term-missing",
+    "--cov-report=html",
+    "--cov-report=xml",
+]
+testpaths = ["tests"]
