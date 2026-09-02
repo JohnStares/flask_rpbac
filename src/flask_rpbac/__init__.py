@@ -104,37 +104,33 @@ class RPBAC:
 
     def role_required(self, role_requirements: Role) -> Callable:
         """
-        A decorator that provides a convenient way to protect a route with only roles\n.
+        Decorate a route so it only allows access when the required roles match.
 
-        Usage::
+        Example::
 
-            @rpbac.role_required(Role("Admin", "Editor", "Reader", match="any"))
-            or
-            @rpbac.role_required(Role("Admin", "Editor", "Reader", match="all"))
-
-        Any of the examples above can be used depending on the use case
+            @app.route("/admin")
+            @rpbac.role_required(Role("admin", match="any"))
+            def admin_panel():
+                return "Admin panel"
 
         Args:
-            role_requirements (Role): A class composition that takes in the required roles needed to
-                access a route.
+            role_requirements (Role): The required role combination for the route.
         """
         return self.required(role_requirements)
 
     def permission_required(self, permission_requirements: Permission) -> Callable:
         """
-        A decorator that provides a convenient way to protect a route with only permissions\n.
+        Decorate a route so it only allows access when the required permissions match.
 
-        Usage::
+        Example::
 
-            @rpbac.permission_required(Permission("post:read", "post:edit", "post:delete", match="any"))
-            or
-            @rpbac.permission_required(Permission("post:read", "post:edit", "post:delete", match="all"))
-
-        Any of the examples above can be used depending on the use case
+            @app.route("/posts")
+            @rpbac.permission_required(Permission("post:read", match="all"))
+            def posts():
+                return "Post list"
 
         Args:
-            permission_requirements (Permission): A class composition that takes in the required permissions needed to
-                access a route.
+            permission_requirements (Permission): The required permission combination for the route.
         """
 
         return self.required(permission_requirements)

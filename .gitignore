@@ -22,3 +22,6 @@ test_blueprint.py
 coverage.xml
 htmlcov/
 .tox/
+
+# Docs build artifacts
+docs/build
