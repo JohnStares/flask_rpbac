@@ -25,3 +25,7 @@ htmlcov/
 
 # Docs build artifacts
 docs/build
+
+# Distribution / packaging
+dist/
+src/Flask_RPBAC.egg-info/

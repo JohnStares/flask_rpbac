@@ -50,7 +50,7 @@ deps = [
     "flask>=3.1",
     "click",
 ]
-commands = [["sphinx-build", "-b", "html", "source", "build/html"]]
+commands = [["sphinx-build", "-b", "html", "{posargs}", "source", "build/html"]]
 
 
 [env.coverage-report]
