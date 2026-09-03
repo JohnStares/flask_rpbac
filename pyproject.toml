@@ -4,12 +4,12 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "Flask-RPBAC"
-version = "0.1.dev0"
+version = "0.1.dev1"
 authors = [{name = "John Stares", email = "wisdom8achor24@gmail.com"}]
 requires-python = ">=3.12"
 description = "Flask-RPBAC is a lightweight role- and permission-based access control extension for Flask."
 license = "MIT"
-readme = "README.md"
+readme = "README.rst"
 keywords = ["RBAC", "RPBAC", "Role", "Permission", "Authorization"]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -17,7 +17,6 @@ classifiers = [
     "Intended Audience :: Developers",
     "Topic :: Software Development :: Libraries :: Python Modules",
     "Programming Language :: Python",
-    "License :: MIT License",
     "Operating System :: OS Independent"
 ]
 dependencies = [
