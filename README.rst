@@ -94,7 +94,8 @@ Python 3.12+ support.
 Contributing
 ------------
 
-Contributions are welcome.
+Contributions are welcome. Please read the `full contribution guide
+<.github/CONTRIBUTING.md>`_ before opening a pull request.
 
 We encourage pull requests, issue reports, and improvements to documentation, tests, and access
 control examples. A healthy contribution workflow is:
@@ -108,6 +109,28 @@ control examples. A healthy contribution workflow is:
 
 Before submitting changes, please run the project test suite and ensure the relevant checks pass.
 If you are improving behavior, add a regression test so the change is protected in the future.
+
+Useful contributor resources:
+
+- `Contribution guide <.github/CONTRIBUTING.md>`_
+- `Code of Conduct <.github/CODE_OF_CONDUCT.md>`_
+- `Security Policy <.github/SECURITY.md>`_
+- `Issue templates <.github/ISSUE_TEMPLATE/>`_
+- `Full documentation <https://flask-rpbac.readthedocs.io/en/latest/>`_
+
+Before submitting a change, contributors should have Python 3.12 or newer, create a virtual
+environment, install the development dependencies, and verify the project locally:
+
+.. code-block:: bash
+
+    python -m venv .venv
+    source .venv/bin/activate
+    pip install -e ".[dev]"
+    pytest
+    tox
+
+Please report security vulnerabilities privately through the process described in the
+`Security Policy <.github/SECURITY.md>`_, rather than opening a public issue.
 
 License
 -------
