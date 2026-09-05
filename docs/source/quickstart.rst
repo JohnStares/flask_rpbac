@@ -57,6 +57,11 @@ These are the loader decorators and each one has a different responsibility:
     Loads both roles and permissions in one callback. This is useful when a single query or
     cached lookup returns all authorization data for the request context.
 
+``@rpbac.load_user_identity``
+    Loads the identity of the currently logged-in user. When caching is enabled, this identity is
+    used as the cache key for that user's roles and permissions. It is a separate callback from
+    ``user_data_loader``.
+
 These decorators are meant to return data for the currently logged-in user only. In practice,
 that data usually comes from your database, an ORM model, a cache, or another user-store layer.
 
@@ -68,6 +73,11 @@ Example:
    from flask_rpbac import RPBAC
 
    rpbac = RPBAC()
+
+   @rpbac.load_user_identity
+   def load_user_identity():
+       # Return the current user's stable, unique identifier.
+       return current_user.id
 
    @rpbac.role_loader
    def load_roles():
@@ -85,19 +95,39 @@ Example:
 
    @rpbac.user_data_loader
    def load_user_data():
-       # Best practice: use one efficient query to fetch the currently logged-in user
-       # by user_id = current_user.id, then return both the roles and permissions in one dictionary.
-       # The dictionary should have keys: id, roles, permissions.
-       user_id = current_user.id
-       roles, permissions = query_user_roles_and_permissions(user_id)
+       # Use one efficient query to fetch both authorization collections for the current user.
+       # The user identity is provided separately by load_user_identity above.
+       roles, permissions = query_user_roles_and_permissions(current_user.id)
        return {
-           "id": user_id, # A string
            "roles": roles, # A list or set
            "permissions": permissions, # A list or set
        }
 
 The loaders are separate from the decorators that protect routes. This keeps route checks
-focused on authorization rules and leaves user identity resolution in dedicated loader functions.
+focused on authorization rules and keeps user identity resolution and authorization-data loading
+in dedicated callbacks. ``user_data_loader`` does not provide the cache identity; use
+``load_user_identity`` for that purpose.
+
+Caching user authorization data
+-------------------------------
+
+To cache a user's roles and permissions in memory, pass a memory cache configuration and register
+``load_user_identity``. The identity callback must return a stable value that uniquely identifies
+the current user. The cache is keyed by that value, so different users receive separate cached
+authorization contexts.
+
+.. code-block:: python
+
+   rpbac = RPBAC(app, cache_config={"type": "memory"})
+
+   @rpbac.load_user_identity
+   def load_user_identity():
+       return current_user.id
+
+The cache is optional. If no cache configuration is supplied, the identity loader is not used for
+caching and the role or permission loaders run for each request context. The in-memory cache is
+intended as a starting implementation and should not be used as a production replacement for a
+durable shared cache.
 
 Protecting routes
 -----------------
