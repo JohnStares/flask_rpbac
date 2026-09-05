@@ -12,6 +12,7 @@ if TYPE_CHECKING:
 
     from .requirements import Requirements
 
+from .cache import CacheConfig, CacheFactory
 from .exc import RPBACError, RPBACPermissionError, RPBACRoleError
 from .requirements import All, Any, Permission, Role
 
@@ -66,10 +67,12 @@ class RPBAC:
         self.add_context_processor = kwargs.get("add_context_processor", True)
         self.raise_generic_error = kwargs.get("raise_generic_error", False)
         self._rejection_hook = kwargs.get("rejection_hook")
+        self._cache_config = kwargs.get("cache_config")
 
         self._permission_loader_callback = None
         self._role_loader_callback = None
         self._user_role_perm_loader_callback = None
+        self.__user_id = None
 
         # Hold the requirements of a blueprint that is protected by rpbac
         self.__blueprint_requirements = {}
@@ -94,6 +97,7 @@ class RPBAC:
         self.add_context_processor = kwargs.get("add_context_processor", True)
         self.raise_generic_error = kwargs.get("raise_generic_error", False)
         self._rejection_hook = kwargs.get("rejection_hook")
+        self._cache_config = kwargs.get("cache_config")
 
         if not hasattr(app, "extensions"):  # pragma: no cover
             app.extensions = {}
@@ -104,7 +108,7 @@ class RPBAC:
             app.context_processor(self._inject_rpbac)
 
         self.__app_exc_handler(app)
-
+        self.__setup_cache()
         self.__register_all_cli_commands(app)
 
     def role_required(self, role_requirements: Role) -> Callable:
@@ -397,8 +401,18 @@ class RPBAC:
             _type_: Any | RPBACBuildContext
         """
 
+        user_id = None
+
         if hasattr(g, "_rpbac_context"):
             return g._rpbac_context
+
+        if self.__user_id is not None and self.cache is not None:
+            user_id = self.__user_id()
+
+            ctx = self.cache.get(user_id)
+
+            if ctx is not None:
+                return ctx
 
         if self._user_role_perm_loader_callback is not None:
             data = self._user_role_perm_loader_callback()
@@ -407,6 +421,9 @@ class RPBAC:
             permissions = data["permissions"]
 
             ctx = RPBACBuildContext(roles=roles, permissions=permissions)
+
+            if user_id is not None and self.cache is not None:
+                self.cache.set(user_id, ctx)
 
             g._rpbac_context = ctx
             return ctx
@@ -422,6 +439,9 @@ class RPBAC:
             permissions = None
 
         ctx = RPBACBuildContext(roles=roles, permissions=permissions)
+
+        if user_id is not None and self.cache is not None:
+            self.cache.set(user_id, ctx)
 
         g._rpbac_context = ctx
         return ctx
@@ -484,3 +504,24 @@ class RPBAC:
         from .cli import rpbac_route_requirements
 
         app.cli.add_command(rpbac_route_requirements)
+
+    def __setup_cache(self):
+        """Sets up cache once the configurations are provided"""
+        _config: dict | None = self._cache_config
+
+        if _config is not None:
+            config = CacheConfig(
+                type=_config.get("type"),
+                url=_config.get("url"),
+                host=_config.get("host"),
+                port=_config.get("port"),
+                db=_config.get("db"),
+                password=_config.get("password"),
+                decode_responses=_config.get("decode_responses"),
+            )
+
+            config_fac = CacheFactory(config)
+            self.cache = config_fac.create()
+
+        else:
+            self.cache = None
