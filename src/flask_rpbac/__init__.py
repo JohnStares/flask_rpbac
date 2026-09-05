@@ -3,7 +3,6 @@ from __future__ import annotations
 import warnings
 from collections.abc import Callable
 from functools import wraps
-from importlib.metadata import version
 from typing import TYPE_CHECKING
 
 from flask import g, jsonify, request
@@ -27,7 +26,7 @@ __all__ = [
     "RPBACRoleError",
     "Role",
 ]
-__version__ = version("Flask-RPBAC")
+__version__ = "0.1.0"
 
 
 class RPBACBuildContext:
