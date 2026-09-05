@@ -1,6 +1,6 @@
-# Contributing to Flask-RBAC
+# Contributing to Flask-RPBAC
 
-Thank you for your interest in contributing to Flask-RBAC! This document provides guidelines and instructions for contributing to this project.
+Thank you for your interest in contributing to Flask-RPBAC! This document provides guidelines and instructions for contributing to this project.
 
 **First time contributing to open source?** Check out this [guide](https://opensource.guide/how-to-contribute/) to learn the basics.
 
