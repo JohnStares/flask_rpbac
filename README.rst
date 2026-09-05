@@ -9,6 +9,10 @@ Flask-RPBAC
     :target: https://codecov.io/github/JohnStares/flask_rpbac
     :alt: Code coverage
 
+.. image:: https://img.shields.io/pypi/v/Flask-RPBAC.svg
+   :target: https://pypi.org/project/Flask-RPBAC/
+   :alt: PyPI version
+
 
 Flask-RPBAC is a lightweight Flask authorization extension for expressing role-based and
 permission-based access control in a clean, composable way. It is designed for applications that
