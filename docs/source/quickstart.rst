@@ -141,6 +141,76 @@ Examples:
 The key idea is that the decorator decides which authorization rule to evaluate, while the loader
 only supplies the current user data.
 
+Handling authorization errors
+------------------------------
+
+When a protected route rejects a request, Flask-RPBAC raises an ``RPBACError``. You can choose
+how that error is handled in one of three ways.
+
+1. Let Flask-RPBAC provide the default response
+
+This is the default behavior. When ``raise_generic_error`` is ``False`` and no rejection hook is
+configured, Flask-RPBAC registers an internal Flask error handler for ``RPBACError``. A rejected
+request receives a ``403`` JSON response similar to:
+
+.. code-block:: json
+
+    {
+         "error": "forbidden",
+         "message": "..."
+    }
+
+No additional configuration is required:
+
+.. code-block:: python
+
+    app = Flask(__name__)
+    rpbac = RPBAC(app)
+
+2. Handle ``RPBACError`` yourself
+
+Set ``raise_generic_error=True`` when you want the exception to propagate instead of using the
+package's default Flask error handler. This lets your application register its own Flask error
+handler or handle the error through its broader exception-management strategy.
+
+.. code-block:: python
+
+    app = Flask(__name__)
+    rpbac = RPBAC(app, raise_generic_error=True)
+
+    @app.errorhandler(RPBACError)
+    def handle_rpbac_error(error):
+         return {"error": "access_denied", "message": str(error)}, 403
+
+3. Return a custom response with a rejection hook
+
+A rejection hook is a function that runs whenever a role or permission requirement is denied.
+The hook receives the ``RPBACError`` and must return the response your Flask route should send.
+You can provide it in the constructor or in the init_app:
+
+.. code-block:: python
+
+    def handle_rejection(error):
+         return {"error": "forbidden", "reason": str(error)}, 403
+
+    app = Flask(__name__)
+    rpbac = RPBAC(app, rejection_hook=handle_rejection)
+
+You can also register the hook with the ``@rpbac.rejection_hook`` decorator:
+
+.. code-block:: python
+
+    app = Flask(__name__)
+    rpbac = RPBAC(app)
+
+    @rpbac.rejection_hook
+    def handle_rejection(error):
+         return {"error": "forbidden", "reason": str(error)}, 403
+
+The decorator registration replaces a rejection hook previously supplied to the RPBAC instance.
+When a rejection hook is configured, it takes precedence over the default Flask error handler.
+The same rejection behavior applies to route-level and blueprint-level protection.
+
 Composable rules
 ----------------
 
