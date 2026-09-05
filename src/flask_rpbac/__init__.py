@@ -230,23 +230,35 @@ class RPBAC:
 
     def user_data_loader(self, func):
         """
-        This decorator sets the callback function used to get the user id, role and
+        This decorator sets the callback function used to get role and
         permissions that will be used in the protected route. This is useful when the role
-        and permissions are to be gotten with a single efficent query and also for caching
-        of roles and permissions of a user (that is where the user id comes in).\n
+        and permissions are to be gotten with a single efficent query.\n
 
-        It is recommended that the returned value be a dictionary. Example::
+        It is recommended that the returned value be a dictionary containing the
+        current user's roles and permissions. Example::
 
             return {
-                "id": f"{user_id}",
                 "roles": [roles] or {roles},
                 "permissions": [permissions] or {permissions}
             }
 
         Returns:
-            _type_: A dictionary of user id, roles and permissions
+            _type_: A dictionary of roles and permissions
         """
         self._user_role_perm_loader_callback = func
+
+        return func
+
+    def load_user_identity(self, func: Callable):
+        """
+        This decorator sets the callback function used to get the current user's
+        stable identity. When caching is configured, the returned identity is used
+        as the cache key for the user's roles and permissions.
+
+        Returns:
+            _type_: A stable user identity value
+        """
+        self.__user_id = func
 
         return func
 
