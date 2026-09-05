@@ -43,10 +43,15 @@ Authorization model
 
 The extension is centered around a simple pattern:
 
-1. Load the current user identity, roles, and permissions.
+1. Load the current user identity with ``load_user_identity`` and load roles and permissions with
+    ``role_loader``, ``permission_loader``, or ``user_data_loader``.
 2. Construct a request-scoped context.
 3. Evaluate a requirement tree made from ``Role``, ``Permission``, ``All``, and ``Any``.
 4. Raise a structured exception when access is denied.
+
+When caching is configured, the value returned by ``load_user_identity`` is used as the cache key.
+The ``user_data_loader`` callback supplies roles and permissions only; it does not supply the
+cache identity.
 
 This keeps the access-control rules declarative and consistent throughout the application.
 
