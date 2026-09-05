@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import warnings
 from collections.abc import Callable
 from functools import wraps
 from typing import TYPE_CHECKING
@@ -63,6 +64,8 @@ class RPBAC:
         """
         # This controls whether rpbac should be available in jinja templates
         self.add_context_processor = kwargs.get("add_context_processor", True)
+        self.raise_generic_error = kwargs.get("raise_generic_error", False)
+        self._rejection_hook = kwargs.get("rejection_hook")
 
         self._permission_loader_callback = None
         self._role_loader_callback = None
@@ -73,7 +76,7 @@ class RPBAC:
 
         # Register this extension with the flask app now if it is provided
         if app is not None:
-            self.init_app(app)
+            self.init_app(app, **kwargs)
         else:
             self.app = None
 
@@ -89,6 +92,8 @@ class RPBAC:
         )
 
         self.add_context_processor = kwargs.get("add_context_processor", True)
+        self.raise_generic_error = kwargs.get("raise_generic_error", False)
+        self._rejection_hook = kwargs.get("rejection_hook")
 
         if not hasattr(app, "extensions"):
             app.extensions = {}
@@ -173,8 +178,14 @@ class RPBAC:
                     if blueprint_requirements
                     else requirements
                 )
+                try:
+                    combined.check(ctx)
+                except RPBACError as e:
+                    if self._rejection_hook is not None:
+                        return self._rejection_hook(e)
 
-                combined.check(ctx)
+                    raise
+
                 return func(*args, **kwargs)
 
             wrapper._rpbac_requirements = requirements  # pyright: ignore
@@ -233,6 +244,25 @@ class RPBAC:
         """
         self._user_role_perm_loader_callback = func
 
+        return func
+
+    def rejection_hook(self, func: Callable):
+        """
+        This decorator sets the callback function that returns a custom
+        error message for both Role and Permission rejection.
+
+        NOTE: This overwrites any other rejection hook set at the
+            construction level
+
+        Returns:
+            _type_: An error response
+        """
+        if self._rejection_hook is not None:
+            warnings.warn(
+                "Overwriting an already registered RPBAC error handler.", stacklevel=2
+            )
+
+        self._rejection_hook = func
         return func
 
     def can(self, requirements: Requirements) -> bool:
@@ -330,7 +360,13 @@ class RPBAC:
                         requirements.escalate(self)
                         ctx = self.__build_context()
 
-                        requirements.check(ctx)
+                        try:
+                            requirements.check(ctx)
+                        except RPBACError as e:
+                            if self._rejection_hook is not None:
+                                return self._rejection_hook(e)
+
+                            raise
 
                         return original_func(*args, **kwargs)
 
@@ -407,9 +443,12 @@ class RPBAC:
     def __app_exc_handler(self, app: Flask):
         """Registered RPBACError(s) to flask for proper exception handling"""
 
-        @app.errorhandler(RPBACError)
-        def handle_rpbacerror(error):
-            return jsonify({"error": f"{error}"}), 403
+        if not self.raise_generic_error and self._rejection_hook is None:
+            app.register_error_handler(RPBACError, self.__default_error_response)
+
+    def __default_error_response(self, error: RPBACError):
+        """Default error returned if no error handler is registered."""
+        return jsonify({"error": "forbidden", "message": str(error)}), 403
 
     def __escalate(self) -> None:
         """Raises an error if flask app is not initialized"""
