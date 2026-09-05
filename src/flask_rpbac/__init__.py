@@ -95,7 +95,7 @@ class RPBAC:
         self.raise_generic_error = kwargs.get("raise_generic_error", False)
         self._rejection_hook = kwargs.get("rejection_hook")
 
-        if not hasattr(app, "extensions"):
+        if not hasattr(app, "extensions"):  # pragma: no cover
             app.extensions = {}
 
         app.extensions["rpbac"] = self
