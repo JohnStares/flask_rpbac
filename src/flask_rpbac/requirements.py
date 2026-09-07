@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import inspect
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from . import RPBAC, RPBACBuildContext
 
-from .exc import RPBACError, RPBACPermissionError, RPBACRoleError
+from .exc import RPBACError, RPBACPermissionError, RPBACPredicateError, RPBACRoleError
 
 
 class Requirements:
@@ -181,6 +184,23 @@ class Role(Requirements):
         """Escalate role loaders for this requirement."""
         rpbac._escalate_role_loaders()
 
+    @classmethod
+    def identifier_from_kwargs(cls, kwarg_name: str) -> Predicate:
+        """
+        Grabs a unique identifier that serves as role for a user from
+        the route kwargs and checks against that with what the role
+        loader returned.
+
+
+        Args:
+            kwarg_name (str): The name of the key used in
+                getting value of the unique identifier from the route
+
+        Returns:
+            Predicate: A Predicate class requirements
+        """
+        return Predicate(lambda ctx: ctx.kwargs[kwarg_name] in ctx.roles)
+
     def __repr__(self) -> str:
         roles = ", ".join(repr(r) for r in self.roles)
 
@@ -239,3 +259,26 @@ class Permission(Requirements):
         perm = ", ".join(repr(r) for r in self.permissions)
 
         return f"{self.__class__.__name__}({perm}, match={self.match})"
+
+
+class Predicate(Requirements):
+    """Requirements that checks a user-supplied callable against the route kwargs."""
+
+    def __init__(self, func: Callable[[RPBACBuildContext], bool]) -> None:
+        self.func = func
+
+    def check(self, ctx: RPBACBuildContext) -> bool:
+        """Calls a user defined function, using the return value to either pass or raise an error"""
+        self.ctx = ctx
+        passed = self.func(ctx)
+
+        if not passed:
+            raise RPBACPredicateError(func=self.func, ctx=self.ctx)
+
+        return True
+
+    def escalate(self, rpbac: RPBAC):
+        pass
+
+    def __repr__(self) -> str:
+        return f"{self.__class__.__name__}({self.func.__name__}({inspect.signature(self.func)}))"

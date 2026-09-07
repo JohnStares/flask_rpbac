@@ -13,16 +13,18 @@ if TYPE_CHECKING:
     from .requirements import Requirements
 
 from .cache import CacheConfig, CacheFactory
-from .exc import RPBACError, RPBACPermissionError, RPBACRoleError
-from .requirements import All, Any, Permission, Role
+from .exc import RPBACError, RPBACPermissionError, RPBACPredicateError, RPBACRoleError
+from .requirements import All, Any, Permission, Predicate, Role
 
 __all__ = [
     "RPBAC",
     "All",
     "Any",
     "Permission",
+    "Predicate",
     "RPBACError",
     "RPBACPermissionError",
+    "RPBACPredicateError",
     "RPBACRoleError",
     "Role",
 ]
@@ -30,11 +32,15 @@ __version__ = "0.1.0"
 
 
 class RPBACBuildContext:
-    """A snapshot object of the current users roles or permissions"""
+    """A snapshot object of the current users url info, roles or permissions"""
 
-    def __init__(self, roles=None, permissions=None) -> None:
+    def __init__(self, roles=None, permissions=None, kwargs=None) -> None:
         self.roles = roles or set()
         self.permissions = permissions or set()
+        self.kwargs = kwargs or {}
+
+    def __repr__(self) -> str:
+        return f"{self.__class__.__name__}(roles={self.roles}, permissions={self.permissions}, kwargs={self.kwargs})"
 
 
 class RPBAC:
@@ -173,7 +179,7 @@ class RPBAC:
 
                 # Each requirement class checks and escalates if its loader callback is not configured before trying to call the callback
                 requirements.escalate(self)
-                ctx = self.__build_context()
+                ctx = self.__build_context(kwargs)
 
                 blueprint_requirements = self.__blueprint_requirements.get(
                     request.blueprint
@@ -375,7 +381,7 @@ class RPBAC:
                     @wraps(func)
                     def wrapper(*args, **kwargs):
                         requirements.escalate(self)
-                        ctx = self.__build_context()
+                        ctx = self.__build_context(kwargs)
 
                         try:
                             requirements.check(ctx)
@@ -402,13 +408,16 @@ class RPBAC:
         blueprint.route = wrapped_route  # pyright: ignore
 
     # Helper methods
-    def __build_context(self):
+    def __build_context(self, kwargs: dict | None = None):
         """
         Responsible for fetching roles and permissions from
         the callback and bulding a fresh snapshot with it on every request,
         making in available to use within a single request context and shipping
         it off to the required decorator.
 
+        Args:
+            kwargs (dict | None): Data flask parses from a URL and made available to the
+                view function.
 
         Returns:
             _type_: Any | RPBACBuildContext
@@ -425,6 +434,11 @@ class RPBAC:
             ctx = self.cache.get(user_id)
 
             if ctx is not None:
+                ctx = RPBACBuildContext(
+                    roles=ctx.roles, permissions=ctx.permissions, kwargs=kwargs
+                )
+
+                g._rpbac_context = ctx
                 return ctx
 
         if self._user_role_perm_loader_callback is not None:
@@ -433,7 +447,7 @@ class RPBAC:
             roles = data["roles"]
             permissions = data["permissions"]
 
-            ctx = RPBACBuildContext(roles=roles, permissions=permissions)
+            ctx = RPBACBuildContext(roles=roles, permissions=permissions, kwargs=kwargs)
 
             if user_id is not None and self.cache is not None:
                 self.cache.set(user_id, ctx)
@@ -451,7 +465,7 @@ class RPBAC:
         else:
             permissions = None
 
-        ctx = RPBACBuildContext(roles=roles, permissions=permissions)
+        ctx = RPBACBuildContext(roles=roles, permissions=permissions, kwargs=kwargs)
 
         if user_id is not None and self.cache is not None:
             self.cache.set(user_id, ctx)
