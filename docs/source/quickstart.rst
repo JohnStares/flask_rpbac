@@ -148,7 +148,7 @@ Examples:
 
 .. code-block:: python
 
-   from flask_rpbac import RPBAC, Role, Permission, All, Any
+    from flask_rpbac import RPBAC, Role, Permission, All, Any
 
    app = Flask(__name__)
    rpbac = RPBAC(app)
@@ -373,6 +373,321 @@ same logic read naturally:
 
 This produces the same logic as nested ``All`` and ``Any`` objects, but often with a more compact
 and readable style.
+
+Static checks and object-level checks
+-------------------------------------
+
+Role and permission requirements are static checks: they answer whether the current user has a
+role or permission that applies to a route in general. That is the right model for endpoints such
+as an admin dashboard or a page that any editor may read, but it is not enough for a rule such as
+"an editor may update only their own post". A user can have the ``post:write`` permission and
+still be forbidden from changing a particular object.
+
+``Predicate`` adds a request-scoped check for those cases. A predicate receives an
+``RPBACBuildContext`` containing:
+
+``ctx.roles``
+    The roles returned by the configured role or user-data loader.
+
+``ctx.permissions``
+    The permissions returned by the configured permission or user-data loader.
+
+``ctx.kwargs``
+    The keyword arguments captured by Flask's route, such as ``post_id`` or ``user_id``.
+
+The route decorator passes these URL arguments into the context before evaluating the requirement.
+This keeps the normal role and permission loaders focused on user-wide authorization data, while a
+predicate can make the final decision using the specific resource addressed by the request.
+
+For example, the following rule permits a user to edit a post only when they own it:
+
+.. code-block:: python
+
+   from flask import Flask
+   from flask_login import current_user
+   from flask_rpbac import RPBAC, Predicate
+
+   app = Flask(__name__)
+   rpbac = RPBAC(app)
+
+   def can_edit_post(ctx):
+       post = Post.query.get(ctx.kwargs["post_id"])
+       return post is not None and post.author_id == current_user.id
+
+   @app.route("/posts/<int:post_id>/edit", methods=["POST"])
+   @rpbac.required(Predicate(can_edit_post))
+   def edit_post(post_id):
+       return "Post updated"
+
+The predicate is evaluated before ``edit_post`` runs. It can load the object using the captured
+identifier, compare it with the current user, and return ``True`` or ``False``. A false result
+raises ``RPBACPredicateError`` and is handled using the same rejection behavior as role and
+permission failures.
+
+You can use the same pattern for read and delete operations. The predicate does not need to query
+the database itself; it may call a repository or service function that returns the authorization
+decision:
+
+.. code-block:: python
+
+   def can_read_invoice(ctx):
+       invoice_id = ctx.kwargs["invoice_id"]
+       return invoice_service.user_can_read(current_user.id, invoice_id)
+
+   @app.route("/invoices/<int:invoice_id>")
+   @rpbac.required(Predicate(can_read_invoice))
+   def invoice(invoice_id):
+       return render_invoice(invoice_id)
+
+   def can_delete_comment(ctx):
+       comment = Comment.query.get(ctx.kwargs["comment_id"])
+       return comment is not None and comment.author_id == current_user.id
+
+   @app.delete("/comments/<int:comment_id>")
+   @rpbac.required(Predicate(can_delete_comment))
+   def delete_comment(comment_id):
+       delete_comment_from_database(comment_id)
+       return "Deleted"
+
+Predicates can also enforce tenant or organization boundaries. Route arguments may contain more
+than one identifier, so the predicate can ensure that both the parent and child object belong to
+the same tenant:
+
+.. code-block:: python
+
+   def can_view_project_file(ctx):
+       return project_file_service.belongs_to_tenant(
+           file_id=ctx.kwargs["file_id"],
+           tenant_id=ctx.kwargs["tenant_id"],
+           user_id=current_user.id,
+       )
+
+   @app.route("/tenants/<tenant_id>/files/<int:file_id>")
+   @rpbac.required(Predicate(can_view_project_file))
+   def project_file(tenant_id, file_id):
+       return send_file_for_download(file_id)
+
+For sharing-based authorization, the predicate can check a relationship instead of ownership. This
+keeps a user's static permissions separate from the list of individual resources they can access:
+
+.. code-block:: python
+
+   def can_view_document(ctx):
+       document_id = ctx.kwargs["document_id"]
+       return document_service.has_access(
+           user_id=current_user.id,
+           document_id=document_id,
+       )
+
+   @app.route("/documents/<uuid:document_id>")
+   @rpbac.required(Predicate(can_view_document))
+   def document(document_id):
+       return render_document(document_id)
+
+The lookup should return ``False`` for a missing object or an unauthorized relationship. Do not
+rely on the view to perform the check after it has already loaded or modified the resource.
+
+Dynamic permissions from route kwargs
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Some applications encode the resource or tenant directly in the permission name. For example,
+the permissions loaded for a user might contain ``"jane_blog:edit_post"`` and
+``"team_blog:read_post"``. RPBAC does not try to guess whether an application uses a
+``<resource>:<action>``, ``<tenant>:<resource>:<action>``, or another permission format. The
+application owns that naming convention and can use a ``Predicate`` to translate route kwargs into
+the permission name it wants to check.
+
+For a route such as ``/blogs/jane_blog/posts/42/edit``, the predicate can build
+``jane_blog:edit_post`` from ``ctx.kwargs["blog_name"]`` and check it against
+``ctx.permissions``:
+
+.. code-block:: python
+
+   def can_edit_post_in_blog(ctx):
+       blog_name = ctx.kwargs["blog_name"]
+       required_permission = f"{blog_name}:edit_post"
+       return required_permission in ctx.permissions
+
+   @app.route("/blogs/<blog_name>/posts/<int:post_id>/edit", methods=["POST"])
+   @rpbac.required(Predicate(can_edit_post_in_blog))
+   def edit_post(blog_name, post_id):
+       return "Post updated"
+
+If the request is for ``/blogs/jane_blog/posts/42/edit``, the predicate checks whether
+``"jane_blog:edit_post"`` is present in the current user's permissions. A request for
+``team_blog`` instead checks ``"team_blog:edit_post"``. The permission loader remains responsible
+for loading the user's permission collection; the predicate only derives the request-specific name
+and performs the check.
+
+The same approach works when the naming scheme has multiple parts. Keep the construction in a
+named function so the policy is easy to test and so normalization is explicit:
+
+.. code-block:: python
+
+   def can_manage_blog_settings(ctx):
+       tenant = ctx.kwargs["tenant"]
+       blog_name = ctx.kwargs["blog_name"]
+       permission = f"{tenant}:{blog_name}:manage_settings"
+       return permission in ctx.permissions
+
+   @app.route("/tenants/<tenant>/blogs/<blog_name>/settings", methods=["POST"])
+   @rpbac.required(Predicate(can_manage_blog_settings))
+   def manage_blog_settings(tenant, blog_name):
+       return "Settings updated"
+
+If names are case-insensitive or allow aliases, normalize the route values before constructing the
+permission. For example, use ``blog_name.casefold()`` if the loader stores lowercase names. Do not
+silently convert identifiers if that could make two distinct resources share a permission name.
+The predicate should return ``False`` when a required kwarg is absent or when the derived name is
+not in ``ctx.permissions``; for a fixed route shape, direct indexing such as
+``ctx.kwargs["blog_name"]`` is appropriate and makes a misconfigured route visible.
+
+Dynamic and static permissions can be required together. This is useful when a user needs both a
+general capability and access to the particular blog named by the request:
+
+.. code-block:: python
+
+   def can_edit_named_blog(ctx):
+       permission = f"{ctx.kwargs['blog_name']}:edit_post"
+       return permission in ctx.permissions
+
+   @app.route("/blogs/<blog_name>/posts/<int:post_id>/edit", methods=["POST"])
+   @rpbac.required(
+       All(
+           Permission("post:write"),
+           Predicate(can_edit_named_blog),
+       )
+   )
+   def edit_named_blog_post(blog_name, post_id):
+       return "Post updated"
+
+An administrator override can be expressed with the same requirement composition:
+
+.. code-block:: python
+
+   @rpbac.required(
+       Any(
+           Role("admin"),
+           All(Permission("post:write"), Predicate(can_edit_named_blog)),
+       )
+   )
+   def edit_named_blog_post(blog_name, post_id):
+       return "Post updated"
+
+Using ``Role.identifier_from_kwargs``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``Role.identifier_from_kwargs(kwarg_name)`` is a convenience requirement for one specific data
+model: the route identifier is stored in the current user's loaded roles. It creates a
+``Predicate`` that evaluates whether ``ctx.kwargs[kwarg_name]`` is present in ``ctx.roles``.
+
+For example, an application may load the account IDs a support user is allowed to access as role
+values, then protect an account route like this:
+
+.. code-block:: python
+
+   @rpbac.role_loader
+   def load_roles():
+       # This application represents accessible account IDs as role values.
+       return account_service.accessible_account_ids(current_user.id)
+
+   @app.route("/accounts/<account_id>")
+   @rpbac.required(Role.identifier_from_kwargs("account_id"))
+   def account(account_id):
+       return render_account(account_id)
+
+If the loader returns ``["account-123", "account-456"]``, the first route is allowed and an
+account such as ``account-999`` is rejected. The route keyword name must match the argument passed
+to ``identifier_from_kwargs``. The route value and loaded role value must also use compatible types;
+for an integer route such as ``<int:account_id>``, return integers from the role loader rather than
+strings.
+
+This helper is useful for a direct identifier-to-access-list check, but it is not a general role
+hierarchy or object relationship system. Use ``Predicate`` when access depends on ownership,
+tenant membership, sharing, object state, or a database relationship. The helper also assumes the
+key exists in the route kwargs; use a matching route or a custom predicate when the URL shape is
+optional or varies.
+
+Predicates are ordinary requirements, so they can be composed with static checks. For example,
+this allows an administrator to edit any post while other users may edit only their own:
+
+.. code-block:: python
+
+   from flask_rpbac import All, Any, Permission, Predicate, Role
+
+   post_editor = All(
+       Permission("post:write"),
+       Predicate(can_edit_post),
+   )
+
+   @app.route("/posts/<int:post_id>/edit", methods=["POST"])
+   @rpbac.required(Any(Role("admin"), post_editor))
+   def edit_post(post_id):
+       return "Post updated"
+
+Another common pattern is to require a static permission for the action and a predicate for the
+object relationship. This makes the policy explicit: the user must be allowed to perform the
+action and must be allowed to perform it on this particular object.
+
+.. code-block:: python
+
+   @app.route("/projects/<int:project_id>/settings", methods=["POST"])
+   @rpbac.required(
+       All(
+           Permission("project:manage"),
+           Predicate(
+               lambda ctx: project_service.is_manager(
+                   current_user.id, ctx.kwargs["project_id"]
+               )
+           ),
+       )
+   )
+   def update_project_settings(project_id):
+       return "Settings updated"
+
+Why this approach
+-----------------
+
+The extension keeps two kinds of authorization data separate. Loaders provide stable,
+user-specific facts such as roles and permissions, while predicates evaluate request-specific facts
+such as a URL identifier, a tenant, or the relationship between a user and a database object.
+That separation avoids putting every possible object into a user's static permission set and makes
+the policy visible at the route where it is enforced.
+
+Predicates should remain small and deterministic. If a check needs a database lookup, load only the
+object or relationship needed for the decision, and return ``False`` when the object does not exist
+or the user cannot access it. Keep mutations in the view rather than in the predicate.
+
+Choosing Flask-RPBAC
+--------------------
+
+Several Flask extensions can participate in authorization, but they solve different problems. The
+following is a practical guide rather than a claim that one library replaces all of the others.
+
+``Flask-Principal``
+    Choose it when you want a flexible identity, need, and permission system that can be integrated
+    into a broader Flask application. It is a good foundation for applications that want to model
+    authorization primitives themselves. Choose Flask-RPBAC when you want route decorators and
+    readable ``Role``/``Permission``/``All``/``Any`` requirement trees out of the box, together
+    with predicates that receive Flask route arguments.
+
+``Flask-Security``
+    Choose it when you need a broader security solution including authentication workflows, user
+    registration, password handling, roles, permissions, and related account features. Choose
+    Flask-RPBAC when authentication is already handled by Flask-Login or another system and the
+    missing piece is a small, explicit authorization layer, especially for per-object checks.
+
+``Flask-RBAC``
+    Choose it when your application primarily needs conventional role-based access checks and its
+    role model and decorators fit your existing code. Choose Flask-RPBAC when authorization rules
+    need composable role and permission logic, blueprint-level protection, or request/object-level
+    predicates using route kwargs.
+
+In short, use Flask-RPBAC for authorization close to Flask routes: static role and permission
+checks for broad access, combined requirements for policy composition, and ``Predicate`` when the
+decision depends on the particular object named by the request. Use Flask-Security for the larger
+authentication and account-management problem, Flask-Principal for a lower-level needs model, or
+Flask-RBAC for a simpler role-only approach that already matches your application.
 
 Template access checks
 ----------------------
