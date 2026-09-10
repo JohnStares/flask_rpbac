@@ -13,16 +13,24 @@ if TYPE_CHECKING:
     from .requirements import Requirements
 
 from .cache import CacheConfig, CacheFactory
-from .exc import RPBACError, RPBACPermissionError, RPBACPredicateError, RPBACRoleError
-from .requirements import All, Any, Permission, Predicate, Role
+from .exc import (
+    RPBACError,
+    RPBACNegationError,
+    RPBACPermissionError,
+    RPBACPredicateError,
+    RPBACRoleError,
+)
+from .requirements import All, Any, Not, Permission, Predicate, Role
 
 __all__ = [
     "RPBAC",
     "All",
     "Any",
+    "Not",
     "Permission",
     "Predicate",
     "RPBACError",
+    "RPBACNegationError",
     "RPBACPermissionError",
     "RPBACPredicateError",
     "RPBACRoleError",

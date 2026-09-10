@@ -27,3 +27,11 @@ class RPBACPredicateError(RPBACError):
         self.func = func
         self.ctx = ctx
         super().__init__(f"Authz Failed: {self.func.__name__} - {self.ctx}")
+
+
+class RPBACNegationError(RPBACError):
+    """Raises Error caused by Not Requirement"""
+
+    def __init__(self, requirement) -> None:
+        self.requirement = requirement
+        super().__init__(f"Negation Denied {self.requirement}")

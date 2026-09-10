@@ -8,7 +8,13 @@ if TYPE_CHECKING:
 
     from . import RPBAC, RPBACBuildContext
 
-from .exc import RPBACError, RPBACPermissionError, RPBACPredicateError, RPBACRoleError
+from .exc import (
+    RPBACError,
+    RPBACNegationError,
+    RPBACPermissionError,
+    RPBACPredicateError,
+    RPBACRoleError,
+)
 
 
 class Requirements:
@@ -133,6 +139,37 @@ class Any(Requirements):
         """Escalate all child requirements."""
         for req in self.reqs:
             req.escalate(rpbac)
+
+    def __repr__(self) -> str:
+        return f"{self.__class__.__name__}({', '.join(repr(r) for r in self.reqs)})"
+
+
+class Not(Requirements):
+    """
+    Requirement that fails if Any child requirements passes. Passes if NONE of the child requirement passes.
+    Equivalent to Not(Any(...)).
+    """
+
+    def __init__(self, *reqs: Requirements):
+        """Initialize with multiple requirements"""
+        self.reqs = reqs
+
+    def check(self, ctx):
+        """Checks requirements until None passes"""
+        for r in self.reqs:
+            try:
+                r.check(ctx)
+            except RPBACError:
+                continue
+            else:
+                raise RPBACNegationError(requirement=r)
+
+        return True
+
+    def escalate(self, rpbac: RPBAC):
+        """Escalates all child requirements."""
+        for r in self.reqs:
+            r.escalate(rpbac)
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}({', '.join(repr(r) for r in self.reqs)})"
