@@ -245,10 +245,14 @@ Composable rules
 ----------------
 
 The real strength of the package is in composition. You can combine checks using
-``All`` and ``Any`` to express complex authorization rules.
+``All``, ``Any``, and ``Not`` to express complex authorization rules.
 
 ``All`` means every requirement must pass.
 ``Any`` means at least one requirement must pass.
+``Not`` means the wrapped requirement must not pass. A requirement that raises an
+``RPBACError`` is considered to have failed, so ``Not`` turns that failure into a
+successful check. If the wrapped requirement passes, ``Not`` raises an
+``RPBACNegationError``.
 
 There is also an important internal rule for the individual requirement classes:
 
@@ -259,7 +263,109 @@ There is also an important internal rule for the individual requirement classes:
 
 That means the internal ``match`` option is already built into ``Role`` and ``Permission``
 for same-type checks. ``All`` and ``Any`` are especially useful when combining different
-requirement types or building nested logic.
+requirement types or building nested logic. ``Not`` is useful for exclusions and for
+expressing the inverse of an existing requirement without writing a new predicate.
+
+Negating requirements
+~~~~~~~~~~~~~~~~~~~~~~
+
+Use ``Not`` with one requirement when access should be granted only if that
+requirement fails:
+
+.. code-block:: python
+
+   from flask_rpbac import Not, Permission, Role
+
+   @app.route("/non-admin-area")
+   @rpbac.required(Not(Role("admin")))
+   def non_admin_area():
+       return "Available to users without the admin role"
+
+   @app.route("/without-delete-access")
+   @rpbac.required(Not(Permission("post:delete")))
+   def without_delete_access():
+       return "Available to users without post:delete"
+
+In these examples, a user who has the excluded role or permission receives a
+``403`` response. A user who does not have it is allowed through. ``Not`` does
+not suppress unrelated application exceptions from a predicate or loader; only
+``RPBACError`` failures count as a failed authorization requirement.
+
+``Not`` can also wrap a ``Predicate``. A predicate that returns ``True`` passes
+normally, so ``Not(Predicate(...))`` returns ``False`` and denies the request.
+A predicate that returns ``False`` raises ``RPBACPredicateError``, so ``Not``
+turns that failure into ``True`` and allows the request:
+
+.. code-block:: python
+
+   def is_owner(ctx):
+       post = load_post(ctx.kwargs["post_id"])
+       return post is not None and post.author_id == current_user.id
+
+   @app.route("/posts/<int:post_id>/not-owned")
+   @rpbac.required(Not(Predicate(is_owner)))
+   def not_owned(post_id):
+       return "This post belongs to somebody else"
+
+The ``/not-owned`` route is allowed when ``is_owner`` returns ``False`` and
+denied when it returns ``True``. This is useful for exclusion rules based on
+request-specific data, such as preventing an owner from using an endpoint or
+allowing access only when a resource does not match a condition. An unexpected
+exception raised inside the predicate is still propagated and is not treated as
+a normal predicate failure.
+
+``Not`` accepts multiple requirements. This form means that none of the listed
+requirements may pass:
+
+.. code-block:: python
+
+   @app.route("/not-staff")
+   @rpbac.required(Not(Role("admin"), Role("moderator")))
+   def not_staff():
+       return "Available to users who are neither admins nor moderators"
+
+Under the hood, ``Not(Role("admin"), Permission("post:delete"))`` has the
+same logic as ``Not(Any(Role("admin"), Permission("post:delete")))``. Both
+requirements must fail for the ``Not`` requirement to pass. This is the right
+form when access must exclude anyone with *either* capability:
+
+.. code-block:: python
+
+   @app.route("/regular-users-only")
+   @rpbac.required(Not(Role("admin"), Permission("billing:manage")))
+   def regular_users_only():
+       return "Available to users without admin or billing access"
+
+Use ``Not(All(...))`` when you want to reject only users who satisfy the whole
+combination. It passes when at least one child requirement fails:
+
+.. code-block:: python
+
+   @app.route("/not-fully-approved")
+   @rpbac.required(
+       Not(
+           All(
+               Role("editor"),
+               Permission("post:publish"),
+           )
+       )
+   )
+   def not_fully_approved():
+       return "Available to users who are not fully approved to publish"
+
+Here, a user with both the ``editor`` role and ``post:publish`` permission is
+denied. A user with only one of them, or neither, is allowed. This differs from
+``Not(Role("editor"), Permission("post:publish"))``:
+
+* ``Not(All(Role("editor"), Permission("post:publish")))`` denies users with
+  both capabilities and allows partial matches.
+* ``Not(Role("editor"), Permission("post:publish"))`` denies users with either
+  capability and allows only users with neither capability.
+
+Choose ``Not(Any(...))`` or multiple arguments to exclude every listed
+requirement. Choose ``Not(All(...))`` to exclude only users who satisfy the
+entire combination. For positive rules, continue to use ``All`` and ``Any``
+directly because they communicate the allowed capability more clearly.
 
 Typical patterns:
 
