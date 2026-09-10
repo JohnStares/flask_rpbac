@@ -1,7 +1,7 @@
 import pytest
 from flask import Flask
 
-from src.flask_rpbac import RPBAC, All, Any, Permission, Role
+from src.flask_rpbac import RPBAC, All, Any, Not, Permission, Role
 from src.flask_rpbac.exc import RPBACError, RPBACPermissionError, RPBACRoleError
 
 
@@ -182,6 +182,8 @@ def test_can_method_uses_rpbac_logic_without_templates(app):
         assert rpbac.can(Permission("post:delete")) is False
         assert rpbac.can(Any(Role("Admin"), Permission("post:read"))) is True
         assert rpbac.can(All(Role("Editor"), Permission("post:read"))) is True
+        assert rpbac.can(Not(Role("Admin"))) is True
+        assert rpbac.can(Not(Role("Editor"))) is False
 
 
 def test_nested_all_any_logic_for_roles_and_permissions(app):
@@ -209,6 +211,10 @@ def test_nested_all_any_logic_for_roles_and_permissions(app):
         )
         assert rpbac.can(All(Role("Admin"), Permission("post:delete"))) is False
         assert rpbac.can(Any(Role("Reader"), Permission("post:delete"))) is False
+        assert rpbac.can(Not(Role("Reader"))) is True
+        assert rpbac.can(Not(Role("Admin"))) is False
+        assert rpbac.can(Not(Any(Role("Reader"), Permission("post:delete")))) is True
+        assert rpbac.can(Not(All(Role("Admin"), Permission("post:read")))) is False
 
 
 def test_user_data_loader_takes_priority_over_role_and_permission_loaders(app, client):
