@@ -67,6 +67,10 @@ Public types
 ``Permission``
     Represents a permission requirement. It can check for any or all matches.
 
+``Predicate``
+    Runs a callable against the request context, including route keyword arguments, for
+    request- or object-level authorization checks.
+
 ``All``
     Combines multiple requirements with logical AND semantics.
 
