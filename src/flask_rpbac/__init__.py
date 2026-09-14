@@ -553,6 +553,8 @@ class RPBAC:
                 db=_config.get("db", 0),
                 username=_config.get("username"),
                 password=_config.get("password"),
+                instance=_config.get("instance"),
+                ttl=_config.get("ttl", 300),
                 ping_on_init=_config.get("ping_on_init", True),
             )
 
