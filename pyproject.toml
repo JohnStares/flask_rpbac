@@ -32,6 +32,7 @@ dev = [
     "sphinx",
     "flask-sphinx-themes",
     "click",
+    "redis",
 ]
 
 [project.urls]
