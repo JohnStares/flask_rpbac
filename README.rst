@@ -26,7 +26,8 @@ The library supports:
 
 - role-based access checks
 - permission-based access checks
-- combined authorization rules with ``All`` and ``Any``
+- combined authorization rules with ``All``, ``Any``, and ``Not``
+- request- and object-level checks with ``Predicate``
 - composable requirement objects using ``&`` and ``|`` operators
 - blueprint-level protection alongside route-level protection
 - loader callbacks for roles, permissions, and user data
@@ -52,7 +53,7 @@ Quick example
 
    from flask import Flask
    from flask_login import current_user
-   from flask_rpbac import RPBAC, Role, Permission, All, Any
+    from flask_rpbac import RPBAC, Role, Permission, All, Any, Not, Predicate
 
    app = Flask(__name__)
    rpbac = RPBAC(app)
@@ -79,6 +80,11 @@ Quick example
    @rpbac.required(Any(Role("admin"), Permission("post:read")))
    def shared_view():
        return "Shared view"
+
+   @app.route("/not-admin")
+   @rpbac.required(Not(Role("admin")))
+   def not_admin_view():
+       return "Non-admin view"
 
 Installation
 ------------

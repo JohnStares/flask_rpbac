@@ -4,7 +4,7 @@ Flask-RPBAC
 Flask-RPBAC is a lightweight role- and permission-based access control extension for Flask.
 It gives you a clean way to enforce authorization rules directly on routes, blueprints,
 and Jinja templates using composable requirements such as ``Role``, ``Permission``, ``All``,
-``Any``, and ``Predicate``.
+``Any``, ``Not``, and ``Predicate``.
 
 The library is designed to fit naturally into Flask applications without requiring a large
 framework or custom middleware stack. It integrates with your existing request lifecycle and
@@ -14,8 +14,9 @@ Key features
 ------------
 
 - Role and permission checks for Flask routes
-- Composable authorization rules with ``All`` and ``Any``
+- Composable authorization rules with ``All``, ``Any``, and ``Not``
 - Request- and object-level checks with ``Predicate`` and route kwargs
+- Explicit ``Not`` requirements for exclusion rules
 - Blueprint-level protection support
 - Simple Jinja helpers for template-level checks
 - CLI inspection for protected routes via ``rpbac-audit``
@@ -35,7 +36,7 @@ Quick example
 .. code-block:: python
 
    from flask import Flask
-    from flask_rpbac import RPBAC, Role, Permission, All, Any, Predicate
+    from flask_rpbac import RPBAC, Role, Permission, All, Any, Not, Predicate
 
    app = Flask(__name__)
    rpbac = RPBAC(app)
@@ -57,6 +58,11 @@ Quick example
    @rpbac.required(Any(Role("admin"), Permission("report:view")))
    def reports():
        return "Reports"
+
+   @app.route("/non-admin")
+   @rpbac.required(Not(Role("admin")))
+   def non_admin():
+       return "Non-admin area"
 
    def can_edit_post(ctx):
        post = Post.query.get(ctx.kwargs["post_id"])
