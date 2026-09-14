@@ -548,11 +548,12 @@ class RPBAC:
             config = CacheConfig(
                 type=_config.get("type"),
                 url=_config.get("url"),
-                host=_config.get("host"),
-                port=_config.get("port"),
-                db=_config.get("db"),
+                host=_config.get("host", "localhost"),
+                port=_config.get("port", 6379),
+                db=_config.get("db", 0),
+                username=_config.get("username"),
                 password=_config.get("password"),
-                decode_responses=_config.get("decode_responses"),
+                ping_on_init=_config.get("ping_on_init", True),
             )
 
             config_fac = CacheFactory(config)
