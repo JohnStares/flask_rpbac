@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import atexit
 import json
 import logging
+import threading
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol
 
@@ -104,6 +106,15 @@ class RedisCache:
         self._socket_connect_timeout = 5.0
         self._decode_responses = True
 
+        self._reconnection_interval = 5.0
+        self._is_healthy = True
+        self._is_reconnecting = False
+        self._lock = threading.Lock()
+        self._stop = threading.Event()
+        self._ping_thread: threading.Thread | None = None
+
+        atexit.register(self.stop)
+
         if self.instance is not None:
             self.__client = self.instance
         else:
@@ -128,7 +139,16 @@ class RedisCache:
         Returns:
             RPBACBuildContext | None: A build context if key is present else None
         """
-        data = self.__client.get(self.__key(key))
+        if not self._is_healthy:
+            return None
+
+        try:
+            data = self.__client.get(self.__key(key))
+        except self._redis.RedisError as e:
+            logger.error(f"{Fore.RED}Redis Error: {e}{Style.RESET_ALL}")
+            self._on_failure()
+
+            return None
 
         if data is not None:
             try:
@@ -148,6 +168,8 @@ class RedisCache:
             key (str): A unique identity mostly the user id
             value (RPBACBuildContext): A build context containing the users roles and permissions
         """
+        if not self._is_healthy:
+            return
 
         _value = json.dumps(
             {
@@ -157,7 +179,13 @@ class RedisCache:
             }
         )
 
-        self.__client.set(self.__key(key), _value, ex=self.ttl)
+        try:
+            self.__client.set(self.__key(key), _value, ex=self.ttl)
+        except self._redis.RedisError as e:
+            logger.error(f"{Fore.RED}Redis Error: {e}{Style.RESET_ALL}")
+            self._on_failure()
+
+            return
 
     def delete(self, key: str):
         """
@@ -166,7 +194,16 @@ class RedisCache:
         Args:
             key (str): A unique identity mostly the user id
         """
-        self.__client.delete(self.__key(key))
+        if not self._is_healthy:
+            return
+
+        try:
+            self.__client.delete(self.__key(key))
+        except self._redis.RedisError as e:
+            logger.error(f"{Fore.RED}Redis Error: {e}{Style.RESET_ALL}")
+            self._on_failure()
+
+            return
 
     # Helper methods
 
@@ -195,6 +232,70 @@ class RedisCache:
     def __key(self, key: str) -> str:
         """To avoid name conflict issue, the package name is used as a prefix to the key"""
         return f"flask_rpbac:{key}"
+
+    def _on_failure(self):
+        """This is called when redis fails. Flips the flags and start reconnection recovery"""
+        with self._lock:
+            if self._is_reconnecting:
+                return
+
+            if not self._is_healthy:
+                return
+
+            self._is_healthy = False
+            self._is_reconnecting = True
+
+        t = threading.Thread(
+            target=self._reconnection_loop, name="RedisCache-reconnect", daemon=True
+        )
+
+        logger.info(
+            f"{Fore.CYAN}INFO: Redis starts reconnection loop.{Style.RESET_ALL}"
+        )
+        self._ping_thread = t
+        t.start()
+
+    def _reconnection_loop(self):
+        """This pings redis every 5 seconds to see if it is back online and flips the flags appropriately"""
+        while not self._stop.is_set():
+            if self._ping():
+                with self._lock:
+                    self._is_healthy = True
+                    self._is_reconnecting = False
+
+                logger.info(f"{Fore.GREEN}INFO: Redis is reconnected.{Style.RESET_ALL}")
+                return
+
+            self._stop.wait(self._reconnection_interval)
+
+        # The self.stop() was called, clean up state.
+        with self._lock:
+            self._is_reconnecting = False
+
+    def _ping(self):
+        """Pings redis and returns True if it is reachable else False"""
+        try:
+            return bool(self.__client.ping())
+        except self._redis.RedisError:
+            return False
+
+    def stop(self, timeout: float = 5.0):
+        """A kill switch to clean up thread processes while it is still running.
+
+        Args:
+            timeout (float, optional): The max time stop() waits for the
+                reconnect thread to actually finish after signalling it. Defaults to 5.0.
+        """
+        if self._stop.is_set():
+            return
+
+        self._stop.set()
+        atexit.unregister(self.stop)
+
+        t = self._ping_thread
+
+        if t is not None and t.is_alive():
+            t.join(timeout=float(timeout))
 
 
 @dataclass
