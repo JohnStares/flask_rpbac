@@ -123,7 +123,7 @@ class RPBAC:
             app.context_processor(self._inject_rpbac)
 
         self.__app_exc_handler(app)
-        self.__setup_cache()
+        self.__setup_cache(app)
         self.__register_all_cli_commands(app)
 
     def role_required(self, role_requirements: Role) -> Callable:
@@ -540,7 +540,7 @@ class RPBAC:
 
         app.cli.add_command(rpbac_route_requirements)
 
-    def __setup_cache(self):
+    def __setup_cache(self, app: Flask):
         """Sets up cache once the configurations are provided"""
         _config: dict | None = self._cache_config
 
@@ -556,6 +556,7 @@ class RPBAC:
                 instance=_config.get("instance"),
                 ttl=_config.get("ttl", 300),
                 ping_on_init=_config.get("ping_on_init", True),
+                app=app,
             )
 
             config_fac = CacheFactory(config)

@@ -12,6 +12,8 @@ from typing import TYPE_CHECKING, Any, Protocol
 from colorama import Fore, Style
 
 if TYPE_CHECKING:
+    from flask import Flask
+
     from . import RPBACBuildContext
 
 logger = logging.getLogger(__name__)
@@ -101,6 +103,7 @@ class RedisCache:
         self.password = options.get("password")
         self.ttl = options.get("ttl")
         self.ping_on_init = options.get("ping_on_init")
+        self.app: Flask = options["app"]
 
         self._socket_timeout = 5.0
         self._socket_connect_timeout = 5.0
@@ -114,6 +117,7 @@ class RedisCache:
         self._ping_thread: threading.Thread | None = None
 
         atexit.register(self.stop)
+        self.app.extensions["redis_thread_stop"] = self.stop
 
         if self.instance is not None:
             self.__client = self.instance
@@ -301,6 +305,7 @@ class RedisCache:
 @dataclass
 class CacheConfig:
     type: str
+    app: Flask
     url: str | None = None
     host: str = "localhost"
     port: int = 6379
@@ -326,6 +331,7 @@ class CacheFactory:
         self.ttl = config.ttl
         self.instance = config.instance
         self.ping_on_init = config.ping_on_init
+        self.app = config.app
 
         self.__caches = {"memory": InMemoryCache, "redis": RedisCache}
 
@@ -342,5 +348,6 @@ class CacheFactory:
                 ttl=self.ttl,
                 instance=self.instance,
                 ping_on_init=self.ping_on_init,
+                app=self.app,
             )
         raise ValueError(f"{self.type} is not a supported type of cache")
