@@ -5,42 +5,62 @@ import sys
 import pytest
 from flask import Flask, g
 
-from src.flask_rpbac import RPBAC, Permission, Role
+from src.flask_rpbac import RPBAC, Permission, Predicate, Role
 
 
 class FakeRedis:
+    class RedisError(Exception):
+        pass
+
     redis_calls = []
     url_calls = []
+    last_client = None
 
     @classmethod
     def Redis(cls, **options):
         cls.redis_calls.append(options)
-        return cls()
+        cls.last_client = cls()
+        return cls.last_client
 
     @classmethod
     def from_url(cls, url, **options):
         cls.url_calls.append((url, options))
-        return cls()
+        cls.last_client = cls()
+        return cls.last_client
 
     def __init__(self):
         self.values = {}
         self.set_calls = []
         self.deleted_keys = []
         self.ping_calls = 0
+        self.get_calls = 0
+        self.set_failures = False
+        self.get_failures = False
+        self.delete_failures = False
+        self.ping_failures = False
 
     def ping(self):
         self.ping_calls += 1
+        if self.ping_failures:
+            raise self.RedisError("Redis is unavailable")
         return True
 
     def get(self, key):
+        self.get_calls += 1
+        if self.get_failures:
+            raise self.RedisError("Redis read failed")
         return self.values.get(key)
 
     def set(self, key, value, ex=None):
+        if self.set_failures:
+            raise self.RedisError("Redis write failed")
         self.set_calls.append((key, value, ex))
         self.values[key] = value
         return True
 
     def delete(self, key):
+        if self.delete_failures:
+            raise self.RedisError("Redis delete failed")
         self.deleted_keys.append(key)
         self.values.pop(key, None)
         return 1
@@ -50,7 +70,11 @@ class FakeRedis:
 def app():
     app = Flask(__name__)
     app.config["TESTING"] = True
-    return app
+    yield app
+
+    stop_reconnect_thread = app.extensions.get("redis_thread_stop")
+    if stop_reconnect_thread is not None:
+        stop_reconnect_thread()
 
 
 def test_memory_cache_is_created_through_rpbac_configuration(app):
@@ -174,6 +198,171 @@ def test_redis_ping_failure_is_propagated_during_rpbac_setup(app):
         )
 
 
+def test_redis_read_error_returns_cache_miss_and_starts_reconnect(app, monkeypatch):
+    FakeRedis.last_client = None
+    monkeypatch.setitem(sys.modules, "redis", FakeRedis)
+    rpbac = RPBAC(
+        app,
+        cache_config={
+            "type": "redis",
+            "ping_on_init": True,
+        },
+    )
+    redis = FakeRedis.last_client
+    redis.get_failures = True
+    redis.ping_failures = True
+    calls = {"roles": 0}
+
+    @rpbac.load_user_identity
+    def load_identity():
+        return "user-1"
+
+    @rpbac.role_loader
+    def load_roles():
+        calls["roles"] += 1
+        return ["admin"]
+
+    @app.route("/redis-read-error")
+    @rpbac.role_required(Role("admin"))
+    def redis_read_error():
+        return "ok"
+
+    response = app.test_client().get("/redis-read-error")
+
+    assert response.status_code == 200
+    assert redis.get_calls == 1
+    assert calls["roles"] == 1
+    assert "redis_thread_stop" in app.extensions
+
+
+def test_redis_write_error_does_not_break_authorization(app, monkeypatch):
+    FakeRedis.last_client = None
+    monkeypatch.setitem(sys.modules, "redis", FakeRedis)
+    rpbac = RPBAC(
+        app,
+        cache_config={
+            "type": "redis",
+            "ping_on_init": True,
+        },
+    )
+    redis = FakeRedis.last_client
+    redis.set_failures = True
+    redis.ping_failures = True
+    calls = {"roles": 0}
+
+    @rpbac.load_user_identity
+    def load_identity():
+        return "user-1"
+
+    @rpbac.role_loader
+    def load_roles():
+        calls["roles"] += 1
+        return ["admin"]
+
+    @app.route("/redis-write-error")
+    @rpbac.role_required(Role("admin"))
+    def redis_write_error():
+        return "ok"
+
+    client = app.test_client()
+    assert client.get("/redis-write-error").status_code == 200
+    assert client.get("/redis-write-error").status_code == 200
+    assert calls["roles"] == 2
+    assert redis.set_calls == []
+
+
+def test_redis_reconnect_stop_is_idempotent(app, monkeypatch):
+    FakeRedis.last_client = None
+    monkeypatch.setitem(sys.modules, "redis", FakeRedis)
+    rpbac = RPBAC(
+        app,
+        cache_config={
+            "type": "redis",
+            "ping_on_init": True,
+        },
+    )
+    redis = FakeRedis.last_client
+
+    @rpbac.load_user_identity
+    def load_identity():
+        return "user-1"
+
+    @rpbac.role_loader
+    def load_roles():
+        return ["admin"]
+
+    @app.route("/redis-stop")
+    @rpbac.role_required(Role("admin"))
+    def redis_stop():
+        return "ok"
+
+    redis.get_failures = True
+    redis.ping_failures = True
+    app.test_client().get("/redis-stop")
+
+    rpbac.cache._on_failure()
+    stop_reconnect_thread = app.extensions["redis_thread_stop"]
+    stop_reconnect_thread()
+    rpbac.cache._on_failure()
+    stop_reconnect_thread()
+
+
+def test_redis_reconnect_marks_cache_healthy_when_ping_recovers(app, monkeypatch):
+    FakeRedis.last_client = None
+    monkeypatch.setitem(sys.modules, "redis", FakeRedis)
+    rpbac = RPBAC(app, cache_config={"type": "redis", "ping_on_init": True})
+    redis = FakeRedis.last_client
+    redis.get_failures = True
+    redis.ping_failures = False
+
+    @rpbac.load_user_identity
+    def load_identity():
+        return "user-1"
+
+    @rpbac.role_loader
+    def load_roles():
+        return ["admin"]
+
+    @app.route("/redis-reconnect")
+    @rpbac.role_required(Role("admin"))
+    def redis_reconnect():
+        return "ok"
+
+    assert app.test_client().get("/redis-reconnect").status_code == 200
+    reconnect_thread = rpbac.cache._ping_thread
+    assert reconnect_thread is not None
+    reconnect_thread.join(timeout=1)
+    assert not reconnect_thread.is_alive()
+
+
+def test_cached_context_uses_current_route_kwargs(app):
+    redis = FakeRedis()
+    rpbac = RPBAC(
+        app,
+        cache_config={"type": "redis", "instance": redis},
+    )
+
+    @rpbac.load_user_identity
+    def load_identity():
+        return "user-1"
+
+    @rpbac.role_loader
+    def load_roles():
+        return ["editor"]
+
+    def can_edit_item(ctx):
+        return ctx.kwargs["item_id"] > 0
+
+    @app.route("/items/<int:item_id>")
+    @rpbac.required(Predicate(can_edit_item))
+    def item(item_id):
+        return str(item_id)
+
+    client = app.test_client()
+    assert client.get("/items/1").get_data(as_text=True) == "1"
+    assert client.get("/items/2").get_data(as_text=True) == "2"
+
+
 def test_redis_cache_round_trips_roles_permissions_and_ttl_through_rpbac(app):
     redis = FakeRedis()
     rpbac = RPBAC(
@@ -229,6 +418,61 @@ def test_redis_cache_can_be_disabled_from_initial_ping(app):
     )
 
     assert redis.ping_calls == 0
+
+
+def test_redis_cache_delete_removes_a_cached_user_value(app):
+    redis = FakeRedis()
+    rpbac = RPBAC(
+        app,
+        cache_config={"type": "redis", "instance": redis},
+    )
+
+    redis.values["cached-user"] = json.dumps(
+        {"roles": ["admin"], "permissions": [], "kwargs": {}}
+    )
+    rpbac.cache.delete("cached-user")
+
+    assert len(redis.deleted_keys) == 1
+
+
+def test_redis_cache_delete_is_skipped_after_cache_failure(app, monkeypatch):
+    FakeRedis.last_client = None
+    monkeypatch.setitem(sys.modules, "redis", FakeRedis)
+    rpbac = RPBAC(app, cache_config={"type": "redis"})
+    redis = FakeRedis.last_client
+    redis.get_failures = True
+    redis.ping_failures = True
+
+    @rpbac.load_user_identity
+    def load_identity():
+        return "user-1"
+
+    @rpbac.role_loader
+    def load_roles():
+        return ["admin"]
+
+    @app.route("/redis-delete-unhealthy")
+    @rpbac.role_required(Role("admin"))
+    def redis_delete_unhealthy():
+        return "ok"
+
+    assert app.test_client().get("/redis-delete-unhealthy").status_code == 200
+    rpbac.cache.delete("user-1")
+
+    assert redis.deleted_keys == []
+
+
+def test_redis_cache_delete_error_starts_reconnect(app, monkeypatch):
+    FakeRedis.last_client = None
+    monkeypatch.setitem(sys.modules, "redis", FakeRedis)
+    rpbac = RPBAC(app, cache_config={"type": "redis"})
+    redis = FakeRedis.last_client
+    redis.delete_failures = True
+    redis.ping_failures = True
+
+    rpbac.cache.delete("user-1")
+
+    assert "redis_thread_stop" in app.extensions
 
 
 def test_redis_cache_malformed_payload_is_deleted_and_reloaded(app):
