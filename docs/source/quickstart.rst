@@ -216,6 +216,40 @@ initialized. It defaults to ``True`` and allows configuration errors or unavaila
 connections to fail immediately during application startup. Set it to ``False`` when you want to
 delay that connectivity check until Redis is first used.
 
+How the Redis cache works
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+When a protected route needs authorization data, Flask-RPBAC calls ``load_user_identity`` and uses
+the returned value as the Redis cache key. The roles and permissions loaded for that identity are
+serialized and stored in Redis with the configured ``ttl``. A later request for the same identity
+can reuse that data instead of calling the role and permission loaders again. The cache is for
+authorization data; it does not authenticate users or replace your database as the source of truth.
+
+If Redis becomes unavailable, the cache treats the operation as a miss and starts a background
+reconnection loop. Authorization can then load fresh data through the configured loaders while the
+cache attempts to recover. The Redis client uses a key prefix managed by Flask-RPBAC, so application
+keys are kept separate from the extension's cache entries.
+
+``RedisCache`` registers its ``stop`` method with Python's ``atexit`` handling, so normal process
+shutdown does not require application code. Tests should stop the reconnect thread during fixture
+teardown so one test cannot leave a background thread running into the next test:
+
+.. code-block:: python
+
+   @pytest.fixture
+   def app():
+       app = Flask(__name__)
+       yield app
+
+       stop_reconnect_thread = app.extensions.get("redis_thread_stop")
+       if stop_reconnect_thread is not None:
+           stop_reconnect_thread()
+
+The Redis cache currently registers this cleanup callback as
+``app.extensions["redis_thread_stop"]``. The RPBAC extension itself is available as
+``app.extensions["rpbac"]``. These callbacks are only relevant when Redis caching is configured;
+the in-memory cache does not start a reconnect thread.
+
 The cache is optional. If no cache configuration is supplied, the identity loader is not used for
 caching and the role or permission loaders run for each request context. Redis requires the
 optional ``redis`` package:

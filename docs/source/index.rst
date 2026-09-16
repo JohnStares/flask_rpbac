@@ -26,6 +26,7 @@ Key features
    :maxdepth: 2
    :caption: Documentation
 
+   why-flask-rpbac
    installation
    quickstart
    api_reference
