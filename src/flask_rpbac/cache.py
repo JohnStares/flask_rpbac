@@ -160,7 +160,7 @@ class RedisCache:
 
                 return RPBACBuildContext(**json.loads(data))
             except (json.JSONDecodeError, TypeError, ValueError):
-                self.__client.delete(self.__key(key))
+                self.delete(key)
 
         return None
 
