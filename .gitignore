@@ -29,3 +29,6 @@ docs/build
 # Distribution / packaging
 dist/
 src/Flask_RPBAC.egg-info/
+
+# Example db instance
+examples/instance
