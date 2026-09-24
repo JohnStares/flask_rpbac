@@ -3,6 +3,7 @@ from __future__ import annotations
 import warnings
 from collections.abc import Callable
 from functools import wraps
+from inspect import iscoroutinefunction
 from typing import TYPE_CHECKING
 
 from flask import g, jsonify, request
@@ -182,32 +183,65 @@ class RPBAC:
             # Store requirement metadata on function itself
             func._rpbac_requirements = requirements  # pyright: ignore
 
-            @wraps(func)
-            def wrapper(*args, **kwargs):
+            original_func = getattr(
+                func, "_original", func
+            )  # for detecting if the func has an async property
 
-                # Each requirement class checks and escalates if its loader callback is not configured before trying to call the callback
-                requirements.escalate(self)
-                ctx = self.__build_context(kwargs)
+            if iscoroutinefunction(original_func):
 
-                blueprint_requirements = self.__blueprint_requirements.get(
-                    request.blueprint
-                )
-                combined = (
-                    All(blueprint_requirements, requirements)
-                    if blueprint_requirements
-                    else requirements
-                )
-                try:
-                    combined.check(ctx)
-                except RPBACError as e:
-                    if self._rejection_hook is not None:
-                        return self._rejection_hook(e)
+                @wraps(func)
+                async def wrapper(*args, **kwargs):  # pyright: ignore
 
-                    raise
+                    # Each requirement class checks and escalates if its loader callback is not configured before trying to call the callback
+                    requirements.escalate(self)
+                    ctx = await self._build_context_async(kwargs)
 
-                return func(*args, **kwargs)
+                    blueprint_requirements = self.__blueprint_requirements.get(
+                        request.blueprint
+                    )
+                    combined = (
+                        All(blueprint_requirements, requirements)
+                        if blueprint_requirements
+                        else requirements
+                    )
+                    try:
+                        combined.check(ctx)
+                    except RPBACError as e:
+                        if self._rejection_hook is not None:
+                            return self._rejection_hook(e)
+
+                        raise
+
+                    return await func(*args, **kwargs)
+            else:
+
+                @wraps(func)
+                def wrapper(*args, **kwargs):
+
+                    # Each requirement class checks and escalates if its loader callback is not configured before trying to call the callback
+                    requirements.escalate(self)
+                    ctx = self.__build_context(kwargs)
+
+                    blueprint_requirements = self.__blueprint_requirements.get(
+                        request.blueprint
+                    )
+                    combined = (
+                        All(blueprint_requirements, requirements)
+                        if blueprint_requirements
+                        else requirements
+                    )
+                    try:
+                        combined.check(ctx)
+                    except RPBACError as e:
+                        if self._rejection_hook is not None:
+                            return self._rejection_hook(e)
+
+                        raise
+
+                    return func(*args, **kwargs)
 
             wrapper._rpbac_requirements = requirements  # pyright: ignore
+            wrapper._original = original_func  # pyright: ignore
 
             return wrapper
 
@@ -383,23 +417,44 @@ class RPBAC:
 
         def wrapped_route(rule: str, **options):
             def decorator(func: Callable):
+                _func = func  # Captures the callable to invoke; never reassigned
                 if not getattr(func, "_rpbac_wrapped", False):
-                    original_func = getattr(func, "_original", func)
+                    original_func = getattr(
+                        func, "_original", func
+                    )  # Used only for detecting async property
 
-                    @wraps(func)
-                    def wrapper(*args, **kwargs):
-                        requirements.escalate(self)
-                        ctx = self.__build_context(kwargs)
+                    if iscoroutinefunction(original_func):
 
-                        try:
-                            requirements.check(ctx)
-                        except RPBACError as e:
-                            if self._rejection_hook is not None:
-                                return self._rejection_hook(e)
+                        @wraps(func)
+                        async def wrapper(*args, **kwargs):  # pyright: ignore
+                            requirements.escalate(self)
+                            ctx = await self._build_context_async(kwargs)
 
-                            raise
+                            try:
+                                requirements.check(ctx)
+                            except RPBACError as e:
+                                if self._rejection_hook is not None:
+                                    return self._rejection_hook(e)
 
-                        return original_func(*args, **kwargs)
+                                raise
+
+                            return await _func(*args, **kwargs)
+                    else:
+
+                        @wraps(func)
+                        def wrapper(*args, **kwargs):
+                            requirements.escalate(self)
+                            ctx = self.__build_context(kwargs)
+
+                            try:
+                                requirements.check(ctx)
+                            except RPBACError as e:
+                                if self._rejection_hook is not None:
+                                    return self._rejection_hook(e)
+
+                                raise
+
+                            return _func(*args, **kwargs)
 
                     wrapper._rpbac_bp_requirements = requirements  # pyright: ignore
                     wrapper._rpbac_wrapped = True  # pyright: ignore
@@ -470,6 +525,80 @@ class RPBAC:
 
         if self._permission_loader_callback is not None:
             permissions = self._permission_loader_callback()
+        else:
+            permissions = None
+
+        ctx = RPBACBuildContext(roles=roles, permissions=permissions, kwargs=kwargs)
+
+        if user_id is not None and self.cache is not None:
+            self.cache.set(user_id, ctx)
+
+        g._rpbac_context = ctx
+        return ctx
+
+    async def _build_context_async(self, kwargs: dict | None = None):
+        """
+        The async verison of the __build_context. Checks if loaders
+        are async and then call in an async pattern
+
+        Args:
+            kwargs (dict | None, optional): Data flask parse from a URL. Defaults to None.
+        """
+        user_id = None
+
+        if hasattr(g, "_rpbac_context"):
+            return g._rpbac_context
+
+        if self.__user_id is not None and self.cache is not None:
+            user_id = (
+                await self.__user_id()
+                if iscoroutinefunction(self.__user_id)
+                else self.__user_id()
+            )
+
+            ctx = self.cache.get(user_id)
+
+            if ctx is not None:
+                ctx = RPBACBuildContext(
+                    roles=ctx.roles, permissions=ctx.permissions, kwargs=kwargs
+                )
+
+                g._rpbac_context = ctx
+                return ctx
+
+        if self._user_role_perm_loader_callback is not None:
+            data = (
+                await self._user_role_perm_loader_callback()
+                if iscoroutinefunction(self._user_role_perm_loader_callback)
+                else self._user_role_perm_loader_callback()
+            )
+
+            roles = data["roles"]
+            permissions = data["permissions"]
+
+            ctx = RPBACBuildContext(roles=roles, permissions=permissions, kwargs=kwargs)
+
+            if user_id is not None and self.cache is not None:
+                self.cache.set(user_id, ctx)
+
+            g._rpbac_context = ctx
+            return ctx
+
+        if self._role_loader_callback is not None:
+            roles = (
+                await self._role_loader_callback()
+                if iscoroutinefunction(self._role_loader_callback)
+                else self._role_loader_callback()
+            )
+        else:
+            roles = None
+
+        if self._permission_loader_callback is not None:
+            permissions = (
+                await self._permission_loader_callback()
+                if iscoroutinefunction(self._permission_loader_callback)
+                else self._permission_loader_callback()
+            )
         else:
             permissions = None
 
