@@ -461,7 +461,7 @@ class RPBAC:
                     wrapper._original = original_func  # pyright: ignore
                     func = wrapper
 
-                endpoint = options.get("endpoint")
+                endpoint = options.pop("endpoint", None)
                 original_blueprint_add_url_rule(rule, endpoint, func, **options)
 
                 return func
