@@ -55,6 +55,15 @@ cache identity.
 
 This keeps the access-control rules declarative and consistent throughout the application.
 
+Asynchronous views and callbacks
+--------------------------------
+
+Async Flask views may use synchronous or asynchronous role, permission, user-data, and identity
+loaders. Flask-RPBAC awaits asynchronous callbacks when building the request context. ``Predicate``
+accepts an async callable, and ``All``, ``Any``, and ``Not`` await asynchronous child requirements
+while preserving their sequential short-circuit semantics. See the :doc:`quickstart` and
+``examples/async_authorization.py`` for usage examples.
+
 Public types
 ------------
 

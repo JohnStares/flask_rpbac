@@ -1,8 +1,10 @@
 import builtins
 import json
+import logging
 import sys
 
 import pytest
+from colorama import Fore
 from flask import Flask, g
 
 from src.flask_rpbac import RPBAC, Permission, Predicate, Role
@@ -32,6 +34,7 @@ class FakeRedis:
         self.values = {}
         self.set_calls = []
         self.deleted_keys = []
+        self.exists_calls = []
         self.ping_calls = 0
         self.get_calls = 0
         self.set_failures = False
@@ -64,6 +67,10 @@ class FakeRedis:
         self.deleted_keys.append(key)
         self.values.pop(key, None)
         return 1
+
+    def exists(self, key):
+        self.exists_calls.append(key)
+        return key in self.values
 
 
 @pytest.fixture
@@ -473,6 +480,134 @@ def test_redis_cache_delete_error_starts_reconnect(app, monkeypatch):
     rpbac.cache.delete("user-1")
 
     assert "redis_thread_stop" in app.extensions
+
+
+def test_rpbac_invalidate_cache_reloads_updated_roles_and_permissions(app):
+    rpbac = RPBAC(app, cache_config={"type": "memory"})
+    current_user = {
+        "id": "user-42",
+        "roles": ["admin"],
+        "permissions": ["post:read"],
+    }
+    loader_calls = {"roles": 0, "permissions": 0}
+
+    @rpbac.load_user_identity
+    def load_identity():
+        return current_user["id"]
+
+    @rpbac.role_loader
+    def load_roles():
+        loader_calls["roles"] += 1
+        return current_user["roles"]
+
+    @rpbac.permission_loader
+    def load_permissions():
+        loader_calls["permissions"] += 1
+        return current_user["permissions"]
+
+    @app.get("/requires-original-access")
+    @rpbac.required(Role("admin") & Permission("post:read"))
+    def original_access():
+        return "originally allowed"
+
+    @app.get("/requires-updated-access")
+    @rpbac.required(Role("editor") & Permission("post:write"))
+    def updated_access():
+        return "updated access allowed"
+
+    client = app.test_client()
+    assert client.get("/requires-original-access").status_code == 200
+    assert loader_calls == {"roles": 1, "permissions": 1}
+
+    # Simulate an administrator changing the user's authorization in storage.
+    current_user["roles"] = ["editor"]
+    current_user["permissions"] = ["post:write"]
+
+    # Invalidate through the public RPBAC API using the identity loader's key.
+    assert rpbac.invalidate_cache("user-42") is None
+
+    stale_access = client.get("/requires-original-access")
+    refreshed_access = client.get("/requires-updated-access")
+
+    assert stale_access.status_code == 403
+    assert refreshed_access.status_code == 200
+    assert refreshed_access.get_data(as_text=True) == "updated access allowed"
+    assert loader_calls == {"roles": 2, "permissions": 2}
+
+
+def test_rpbac_invalidate_redis_cache_reloads_updated_roles_and_permissions(app):
+    redis = FakeRedis()
+    rpbac = RPBAC(
+        app,
+        cache_config={"type": "redis", "instance": redis},
+    )
+    current_user = {
+        "id": "redis-user-42",
+        "roles": ["admin"],
+        "permissions": ["post:read"],
+    }
+    loader_calls = {"roles": 0, "permissions": 0}
+
+    @rpbac.load_user_identity
+    def load_identity():
+        return current_user["id"]
+
+    @rpbac.role_loader
+    def load_roles():
+        loader_calls["roles"] += 1
+        return current_user["roles"]
+
+    @rpbac.permission_loader
+    def load_permissions():
+        loader_calls["permissions"] += 1
+        return current_user["permissions"]
+
+    @app.get("/redis-requires-original-access")
+    @rpbac.required(Role("admin") & Permission("post:read"))
+    def original_redis_access():
+        return "originally allowed"
+
+    @app.get("/redis-requires-updated-access")
+    @rpbac.required(Role("editor") & Permission("post:write"))
+    def updated_redis_access():
+        return "updated access allowed"
+
+    client = app.test_client()
+    assert client.get("/redis-requires-original-access").status_code == 200
+    assert loader_calls == {"roles": 1, "permissions": 1}
+
+    current_user["roles"] = ["editor"]
+    current_user["permissions"] = ["post:write"]
+
+    # Invalidate through RPBAC. The next request must fetch the changed data.
+    assert rpbac.invalidate_cache("redis-user-42") is None
+
+    stale_access = client.get("/redis-requires-original-access")
+    refreshed_access = client.get("/redis-requires-updated-access")
+
+    assert stale_access.status_code == 403
+    assert refreshed_access.status_code == 200
+    assert refreshed_access.get_data(as_text=True) == "updated access allowed"
+    assert loader_calls == {"roles": 2, "permissions": 2}
+    assert len(redis.exists_calls) == 1
+
+
+def test_invalidate_cache_without_configured_cache_logs_red_error_and_continues(
+    app, caplog
+):
+    rpbac = RPBAC(app)
+
+    with caplog.at_level(logging.ERROR, logger="src.flask_rpbac"):
+        result = rpbac.invalidate_cache("user-without-cache")
+
+    assert result is None
+    error_records = [
+        record
+        for record in caplog.records
+        if "Cache is not configured." in record.message
+    ]
+    assert len(error_records) == 1
+    assert Fore.RED in error_records[0].message
 
 
 def test_redis_cache_malformed_payload_is_deleted_and_reloaded(app):

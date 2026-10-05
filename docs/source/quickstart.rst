@@ -108,6 +108,40 @@ focused on authorization rules and keeps user identity resolution and authorizat
 in dedicated callbacks. ``user_data_loader`` does not provide the cache identity; use
 ``load_user_identity`` for that purpose.
 
+Using asynchronous views and callbacks
+--------------------------------------
+
+Flask-RPBAC supports ``async def`` views. Loaders for roles, permissions, combined user data, and
+cached user identity may be synchronous or asynchronous; async callbacks are awaited when used by
+an async view. Predicates may also be async, so they can await an application service or data-layer
+call and inspect the same ``ctx.roles``, ``ctx.permissions``, and ``ctx.kwargs`` as a synchronous
+predicate.
+
+Async predicates can be composed with ``All``, ``Any``, and ``Not``:
+
+.. code-block:: python
+
+   async def can_edit_post(ctx):
+       post = await post_service.get(ctx.kwargs["post_id"])
+       return post is not None and post.author_id == current_user.id
+
+   @app.patch("/posts/<int:post_id>")
+   @rpbac.required(
+       Any(
+           Role("admin"),
+           All(Permission("post:write"), Predicate(can_edit_post)),
+       )
+   )
+   async def edit_post(post_id):
+       await post_service.update(post_id)
+       return {"status": "updated"}
+
+Asynchronous checks are awaited in order and keep the usual short-circuit behavior: ``All`` stops
+on failure, ``Any`` stops on success, and ``Not`` rejects when its child passes. Synchronous
+loaders and predicates remain valid on async views. See ``examples/async_authorization.py`` for a
+larger example. Flask async views require Flask's async extra, which Flask-RPBAC declares as a
+dependency.
+
 Caching user authorization data
 -------------------------------
 
@@ -229,6 +263,76 @@ If Redis becomes unavailable, the cache treats the operation as a miss and start
 reconnection loop. Authorization can then load fresh data through the configured loaders while the
 cache attempts to recover. The Redis client uses a key prefix managed by Flask-RPBAC, so application
 keys are kept separate from the extension's cache entries.
+
+Invalidating cached authorization data
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+When roles or permissions change while caching is enabled, the cache may still contain the user's
+previous authorization data until its TTL expires. After the database transaction successfully
+commits the change, call ``rpbac.invalidate_cache(identity)`` for each affected user. Pass the same
+stable identity value (including its type or string conversion) that the registered
+``load_user_identity`` callback returns. Invalidation removes the cached entry; the user's next
+protected request misses the cache and reloads current roles and permissions.
+
+For example, after changing one user's assigned roles in an admin view:
+
+.. code-block:: python
+
+    import sqlalchemy as sql
+   from flask import request
+   from flask_rpbac import Role as RoleRequirement
+
+   @app.patch("/admin/users/<int:user_id>/roles")
+   @rpbac.role_required(RoleRequirement("admin"))
+   def update_user_roles(user_id):
+       user = db.session.get(User, user_id)
+       if user is None:
+           return {"error": "user_not_found"}, 404
+
+       identity = str(user.id)  # load_user_identity returns this same value.
+       role_names = request.get_json()["roles"]
+       user.roles = db.session.scalars(
+           sql.select(Role).where(Role.name.in_(role_names))
+       ).all()
+       db.session.commit()
+
+       rpbac.invalidate_cache(identity)
+       return {"status": "updated"}
+
+Only invalidate after ``commit`` succeeds. If the transaction fails, the stored authorization state
+has not changed, so the existing cache entry should remain valid. ``invalidate_cache`` is supported
+for both memory and Redis cache configurations; it is a no-op for a missing entry. It logs an error
+if no cache is configured.
+
+When a permission is changed on a shared role, every user assigned to that role may have different
+effective permissions after the commit. Invalidate each affected user's identity, not just the
+administrator who made the change:
+
+.. code-block:: python
+
+    from flask import request
+    import sqlalchemy as sql
+
+   role = db.session.get(Role, role_id)
+   if role is None:
+       return {"error": "role_not_found"}, 404
+
+   affected_identities = [str(user.id) for user in role.users]
+   role.permissions = db.session.scalars(
+       sql.select(Permission).where(
+           Permission.name.in_(request.get_json()["permissions"])
+       )
+   ).all()
+   db.session.commit()
+
+   for identity in affected_identities:
+       rpbac.invalidate_cache(identity)
+
+If a change affects users through multiple roles, collect the distinct identities of all affected
+users before committing, then invalidate each identity after the commit. Redis invalidation reaches
+the shared cache, while the in-memory cache only affects the current process. A complete example
+with Redis configuration and both update flows is available in
+``examples/cache_invalidation.py``.
 
 ``RedisCache`` registers its ``stop`` method with Python's ``atexit`` handling, so normal process
 shutdown does not require application code. Tests should stop the reconnect thread during fixture

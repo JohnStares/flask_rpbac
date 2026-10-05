@@ -15,6 +15,7 @@ Key features
 
 - Role and permission checks for Flask routes
 - Composable authorization rules with ``All``, ``Any``, and ``Not``
+- Async views, authorization loaders, and predicates
 - Request- and object-level checks with ``Predicate`` and route kwargs
 - Explicit ``Not`` requirements for exclusion rules
 - Blueprint-level protection support
