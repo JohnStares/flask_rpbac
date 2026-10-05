@@ -97,7 +97,10 @@ class All(Requirements):
             req.escalate(rpbac)
 
     async def async_check(self, ctx: RPBACBuildContext):
-        return self.check(ctx)
+        for r in self.reqs:
+            await r.async_check(ctx)
+
+        return True
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}({', '.join(repr(r) for r in self.reqs)})"
@@ -148,7 +151,18 @@ class Any(Requirements):
             req.escalate(rpbac)
 
     async def async_check(self, ctx: RPBACBuildContext):
-        return self.check(ctx)
+        last_error = None
+
+        for r in self.reqs:
+            try:
+                await r.async_check(ctx)
+                return True
+
+            except RPBACError as e:
+                last_error = e
+
+        if last_error is not None:
+            raise last_error
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}({', '.join(repr(r) for r in self.reqs)})"
@@ -182,7 +196,15 @@ class Not(Requirements):
             r.escalate(rpbac)
 
     async def async_check(self, ctx: RPBACBuildContext):
-        return self.check(ctx)
+        for r in self.reqs:
+            try:
+                await r.async_check(ctx)
+            except RPBACError:
+                continue
+            else:
+                raise RPBACNegationError(requirement=r)
+
+        return True
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}({', '.join(repr(r) for r in self.reqs)})"
