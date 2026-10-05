@@ -55,6 +55,21 @@ cache identity.
 
 This keeps the access-control rules declarative and consistent throughout the application.
 
+Predicate result store
+----------------------
+
+Each ``RPBACBuildContext`` has a ``pstore`` dictionary for sharing intermediate values among
+predicates evaluated against that context. Store a result in one predicate and read it in a later
+predicate to avoid repeating an expensive lookup. The store belongs to the current request context;
+it is not a persistent or cross-request cache.
+
+Predicate dependencies are order-sensitive. Place a producer before its consumer in an ``All``
+requirement, which evaluates children sequentially and stops on the first failure. Reading a missing
+store key raises ``KeyError`` unless the predicate handles that case. ``Any`` and ``Not`` also
+short-circuit, so do not assume a predicate in one branch will run before another branch. Async
+combinators await children in sequence and share the same store, subject to the same ordering and
+short-circuit rules. See ``examples/predicate_store.py`` for a working pattern.
+
 Asynchronous views and callbacks
 --------------------------------
 
@@ -78,7 +93,8 @@ Public types
 
 ``Predicate``
     Runs a callable against the request context, including route keyword arguments, for
-    request- or object-level authorization checks.
+    request- or object-level authorization checks. The context's ``pstore`` can share intermediate
+    results with subsequent predicates in the same request check.
 
 ``All``
     Combines multiple requirements with logical AND semantics.

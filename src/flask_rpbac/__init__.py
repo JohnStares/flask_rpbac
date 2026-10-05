@@ -39,7 +39,7 @@ __all__ = [
     "RPBACRoleError",
     "Role",
 ]
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +51,10 @@ class RPBACBuildContext:
         self.roles = roles or set()
         self.permissions = permissions or set()
         self.kwargs = kwargs or {}
+
+        # A dict obj where predicates can attach data to be used by other predicates
+        # within the same request scope
+        self.pstore = {}
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}(roles={self.roles}, permissions={self.permissions}, kwargs={self.kwargs})"
