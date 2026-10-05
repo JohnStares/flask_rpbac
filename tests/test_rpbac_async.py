@@ -2,7 +2,12 @@ import pytest
 from flask import Blueprint, Flask
 
 from src.flask_rpbac import RPBAC, All, Not, Permission, Predicate, Role
-from src.flask_rpbac.exc import RPBACError, RPBACPermissionError, RPBACRoleError
+from src.flask_rpbac.exc import (
+    RPBACError,
+    RPBACPermissionError,
+    RPBACPredicateError,
+    RPBACRoleError,
+)
 
 
 @pytest.fixture
@@ -299,6 +304,108 @@ def test_async_route_predicate_receives_route_kwargs(app, client):
 
     assert client.get("/async-items/7").status_code == 200
     assert client.get("/async-items/8").status_code == 403
+
+
+def test_async_predicate_receives_context_and_is_awaited(app, client):
+    rpbac = RPBAC(app)
+    predicate_calls = []
+
+    @rpbac.role_loader
+    async def load_roles():
+        return ["editor"]
+
+    @rpbac.permission_loader
+    async def load_permissions():
+        return ["post:write"]
+
+    async def can_edit(ctx):
+        predicate_calls.append(ctx)
+        return (
+            ctx.kwargs == {"post_id": 42}
+            and set(ctx.roles) == {"editor"}
+            and set(ctx.permissions) == {"post:write"}
+        )
+
+    @app.get("/async-predicate/posts/<int:post_id>")
+    @rpbac.required(Predicate(can_edit))
+    async def async_predicate_post(post_id):
+        return {"post_id": post_id}
+
+    response = client.get("/async-predicate/posts/42")
+
+    assert response.status_code == 200
+    assert response.get_json() == {"post_id": 42}
+    assert len(predicate_calls) == 1
+    assert predicate_calls[0].kwargs == {"post_id": 42}
+
+
+@pytest.mark.parametrize("predicate_result", [False, None, 0, ""])
+def test_async_predicate_false_results_raise_structured_forbidden_error(
+    app, client, predicate_result
+):
+    rpbac = RPBAC(app, raise_generic_error=True)
+    predicate_calls = []
+
+    async def deny(ctx):
+        predicate_calls.append(ctx)
+        return predicate_result
+
+    predicate = Predicate(deny)
+
+    @app.get("/async-predicate-denied/<int:item_id>")
+    @rpbac.required(predicate)
+    async def async_predicate_denied(item_id):
+        return "unreachable"
+
+    with pytest.raises(RPBACPredicateError) as raised:
+        client.get("/async-predicate-denied/19")
+
+    assert raised.value.func is deny
+    assert raised.value.ctx.kwargs == {"item_id": 19}
+    assert predicate_calls == [raised.value.ctx]
+
+
+def test_async_predicate_exception_propagates_without_wrapping(app, client):
+    rpbac = RPBAC(app, raise_generic_error=True)
+
+    async def broken_predicate(ctx):
+        raise LookupError(f"item {ctx.kwargs['item_id']} is unavailable")
+
+    @app.get("/async-predicate-exception/<int:item_id>")
+    @rpbac.required(Predicate(broken_predicate))
+    async def async_predicate_exception(item_id):
+        return "unreachable"
+
+    with pytest.raises(LookupError, match="item 8 is unavailable"):
+        client.get("/async-predicate-exception/8")
+
+
+def test_async_blueprint_predicate_receives_kwargs_and_handles_denial(app, client):
+    rpbac = RPBAC(app)
+    blueprint = Blueprint("async_predicate_bp", __name__)
+    calls = []
+
+    async def owns_record(ctx):
+        calls.append(ctx.kwargs["record_id"])
+        return ctx.kwargs["record_id"] == 5
+
+    rpbac.protect_blueprint(blueprint, Predicate(owns_record))
+
+    @blueprint.get("/<int:record_id>")
+    async def record(record_id):
+        return {"record_id": record_id}
+
+    app.register_blueprint(blueprint, url_prefix="/async-predicate-records")
+
+    allowed = client.get("/async-predicate-records/5")
+    denied = client.get("/async-predicate-records/6")
+
+    assert allowed.status_code == 200
+    assert allowed.get_json() == {"record_id": 5}
+    assert denied.status_code == 403
+    assert denied.get_json()["error"] == "forbidden"
+    assert "Authz Failed" in denied.get_json()["message"]
+    assert calls == [5, 6]
 
 
 def test_async_blueprint_route_uses_async_loaders(app, client):
