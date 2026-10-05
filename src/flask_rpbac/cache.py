@@ -36,6 +36,7 @@ class Cache(Protocol):
     def get(self, key: str) -> RPBACBuildContext | None: ...
     def set(self, key: str, value: RPBACBuildContext): ...
     def delete(self, key: str): ...
+    def invalidate_cache(self, key: str): ...
 
 
 class InMemoryCache:
@@ -81,6 +82,15 @@ class InMemoryCache:
         """
         if key in self.__cache:
             del self.__cache[key]
+
+    def invalidate_cache(self, key: str) -> None:
+        """
+        Removes data tied to a key from cache
+
+        Args:
+            key (str): The key related to a user
+        """
+        self.delete(key)
 
     def __warn(self):
         message = (
@@ -203,6 +213,24 @@ class RedisCache:
 
         try:
             self.__client.delete(self.__key(key))
+        except self._redis.RedisError as e:
+            logger.error(f"{Fore.RED}Redis Error: {e}{Style.RESET_ALL}")
+            self._on_failure()
+
+            return
+
+    def invalidate_cache(self, key: str) -> None:
+        """
+        Removes data tied to a key from cache
+
+        Args:
+            key (str): The identity for the particular same with what @load_user_identity
+                returns
+        """
+        try:
+            if self.__client.exists(self.__key(key)):
+                self.delete(key)
+
         except self._redis.RedisError as e:
             logger.error(f"{Fore.RED}Redis Error: {e}{Style.RESET_ALL}")
             self._on_failure()

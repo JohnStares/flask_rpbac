@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import logging
 import warnings
 from collections.abc import Callable
 from functools import wraps
 from inspect import iscoroutinefunction
 from typing import TYPE_CHECKING
 
+from colorama import Fore, Style
 from flask import g, jsonify, request
 
 if TYPE_CHECKING:
@@ -38,6 +40,8 @@ __all__ = [
     "Role",
 ]
 __version__ = "0.2.0"
+
+logger = logging.getLogger(__name__)
 
 
 class RPBACBuildContext:
@@ -387,6 +391,35 @@ class RPBAC:
             bool: A True if the role requirements passes else False
         """
         return self.can(Role(*role))
+
+    def invalidate_cache(self, key: str) -> None:
+        """
+        Used to invalidate a cache made to a user in situations where a
+        permission or role of a user is changed at runtime (from admin panel).
+        This removes the roles and permissions of a user tied to the key from cache
+        and thus, it will result to a cache miss making the extension hit the database
+        to get to new values for permissions and roles.
+
+        If key doesn't exists, it silently passes for two reasons:
+            1. The key must have expired
+            2. The key was never added to cache to begin with.
+
+        Hence, there is no need to panic. Ensure the key is exactly
+        what the @load_user_identity returns
+
+        Args:
+            key (str): The identity for the particular same with what @load_user_identity
+                returns
+        """
+
+        if self.cache is not None:
+            self.cache.invalidate_cache(key)
+
+            return
+
+        logger.error(
+            f"{Fore.RED}Redis Error: Cache is not configured.{Style.RESET_ALL}"
+        )
 
     def protect_blueprint(self, blueprint: Blueprint, requirements: Requirements):
         """
