@@ -1,7 +1,7 @@
 import pytest
 from flask import Blueprint, Flask
 
-from src.flask_rpbac import RPBAC, All, Not, Permission, Predicate, Role
+from src.flask_rpbac import RPBAC, All, Any, Not, Permission, Predicate, Role
 from src.flask_rpbac.exc import (
     RPBACError,
     RPBACPermissionError,
@@ -378,6 +378,72 @@ def test_async_predicate_exception_propagates_without_wrapping(app, client):
 
     with pytest.raises(LookupError, match="item 8 is unavailable"):
         client.get("/async-predicate-exception/8")
+
+
+def test_async_predicate_inside_all_is_awaited(app, client):
+    rpbac = RPBAC(app)
+    predicate_calls = []
+
+    @rpbac.role_loader
+    async def load_roles():
+        return ["editor"]
+
+    async def predicate(ctx):
+        predicate_calls.append(ctx.kwargs["item_id"])
+        return False
+
+    @app.get("/async-all/<int:item_id>")
+    @rpbac.required(All(Role("editor"), Predicate(predicate)))
+    async def async_all(item_id):
+        return "unreachable"
+
+    response = client.get("/async-all/12")
+
+    assert response.status_code == 403
+    assert predicate_calls == [12]
+
+
+def test_async_predicate_inside_any_is_awaited_before_fallback(app, client):
+    rpbac = RPBAC(app)
+    predicate_calls = []
+
+    @rpbac.role_loader
+    async def load_roles():
+        return []
+
+    async def predicate(ctx):
+        predicate_calls.append(ctx.kwargs["item_id"])
+        return False
+
+    @app.get("/async-any/<int:item_id>")
+    @rpbac.required(Any(Predicate(predicate), Role("admin")))
+    async def async_any(item_id):
+        return "unreachable"
+
+    response = client.get("/async-any/23")
+
+    assert response.status_code == 403
+    assert predicate_calls == [23]
+
+
+def test_async_predicate_inside_not_allows_when_predicate_is_false(app, client):
+    rpbac = RPBAC(app)
+    predicate_calls = []
+
+    async def predicate(ctx):
+        predicate_calls.append(ctx.kwargs["item_id"])
+        return False
+
+    @app.get("/async-not/<int:item_id>")
+    @rpbac.required(Not(Predicate(predicate)))
+    async def async_not(item_id):
+        return {"allowed": True, "item_id": item_id}
+
+    response = client.get("/async-not/34")
+
+    assert response.status_code == 200
+    assert response.get_json() == {"allowed": True, "item_id": 34}
+    assert predicate_calls == [34]
 
 
 def test_async_blueprint_predicate_receives_kwargs_and_handles_denial(app, client):
