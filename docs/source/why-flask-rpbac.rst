@@ -124,6 +124,11 @@ translate a route argument into that name explicitly:
 This keeps application-specific policy decisions in application code while allowing them to
 participate in the same requirement composition as static role and permission checks.
 
+When several predicates need the same resource data, they can share an intermediate result through
+``ctx.pstore``. Because this store belongs to one request context, put the predicate that loads a
+value before predicates that consume it; see :doc:`quickstart` for the ordering and short-circuit
+details.
+
 What Flask-RPBAC deliberately does not provide
 ----------------------------------------------
 

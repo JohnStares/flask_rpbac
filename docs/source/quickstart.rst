@@ -734,9 +734,104 @@ still be forbidden from changing a particular object.
 ``ctx.kwargs``
     The keyword arguments captured by Flask's route, such as ``post_id`` or ``user_id``.
 
+``ctx.pstore``
+    A mutable, request-scoped dictionary that predicates can use to share intermediate results
+    with other predicates in the same authorization check.
+
 The route decorator passes these URL arguments into the context before evaluating the requirement.
 This keeps the normal role and permission loaders focused on user-wide authorization data, while a
 predicate can make the final decision using the specific resource addressed by the request.
+
+Sharing work between predicates with ``ctx.pstore``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Use ``ctx.pstore`` when multiple predicates need the same expensive result, such as a database
+record or a service response. The first predicate can fetch the data, store it under a key, and
+perform its own check. Later predicates can read that stored value and perform additional checks
+without repeating the query. Predicates may also store derived values for predicates that run after
+them.
+
+For example, load a post once, then use it to check both existence and ownership:
+
+.. code-block:: python
+
+   def load_post_for_request(ctx):
+       post = post_repository.get(ctx.kwargs["post_id"])
+       if post is None:
+           return False
+
+       ctx.pstore["post"] = post
+       return True
+
+   def current_user_owns_post(ctx):
+       post = ctx.pstore["post"]
+       return post.author_id == current_user.id
+
+   @app.patch("/posts/<int:post_id>")
+   @rpbac.required(
+       All(
+           Predicate(load_post_for_request),
+           Predicate(current_user_owns_post),
+       )
+   )
+   def edit_post(post_id):
+       return "Post updated"
+
+``All`` checks children sequentially and stops when one fails. Here, the loader predicate must
+appear before ``current_user_owns_post`` so the stored post exists before the second predicate
+reads it. The query runs once for a successful authorization check, and a missing post makes the
+first predicate fail without running the ownership check.
+
+The ordering is a correctness requirement, not merely a performance preference. Reading a key
+before a predicate has stored it raises ``KeyError`` (unless your code handles a missing key
+explicitly). Put a producer predicate before every consumer that depends on its value, and use
+distinct, descriptive keys when several predicates store different values:
+
+.. code-block:: python
+
+   def load_post_and_blog(ctx):
+       post = post_repository.get(ctx.kwargs["post_id"])
+       if post is None:
+           return False
+
+       ctx.pstore["post"] = post
+       ctx.pstore["blog"] = blog_repository.get(post.blog_id)
+       return ctx.pstore["blog"] is not None
+
+   def can_manage_post_blog(ctx):
+       post = ctx.pstore["post"]
+       blog = ctx.pstore["blog"]
+       return blog.owner_id == current_user.id and post.blog_id == blog.id
+
+   @rpbac.required(
+       All(
+           Predicate(load_post_and_blog),
+           Predicate(can_manage_post_blog),
+       )
+   )
+   def manage_post(post_id):
+       return "Managed"
+
+``ctx.pstore`` exists only for the current request context. It is not a cross-request cache, does not
+replace the configured role/permission cache, and is reset for the next request. Store only
+request-specific intermediate values needed during authorization. It may be used by synchronous
+and asynchronous predicates alike; for async requests, store the awaited result in the same way.
+
+Pay attention to combinator short-circuiting when predicates depend on stored data:
+
+* ``All(A, B)`` is the recommended form for a producer ``A`` and a consumer ``B`` that both must
+  pass. ``B`` runs only after ``A`` passes and stores its result.
+* ``Any(A, B)`` stops as soon as a child passes. If ``A`` passes, ``B`` will not run; if ``A``
+  fails, ``B`` may run and can see values ``A`` stored before failing. Do not assume a producer
+  inside one alternative will run for another alternative.
+* ``Not`` stops when a child passes and continues after a child raises an authorization error.
+  Because it inverts the child result, it is usually not a good place to coordinate producer and
+  consumer predicates. Keep dependent predicates in an ordered ``All`` requirement instead.
+
+Async predicates in an async view can share ``ctx.pstore`` as well. ``All``, ``Any``, and ``Not``
+await their children in order, with the same short-circuit rules described above. See
+``examples/predicate_store.py`` for a complete example that counts repository queries and shares
+the loaded object.
 
 For example, the following rule permits a user to edit a post only when they own it:
 
