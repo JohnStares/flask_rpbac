@@ -4,7 +4,7 @@ import inspect
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Awaitable, Callable
 
     from . import RPBAC, RPBACBuildContext
 
@@ -43,6 +43,10 @@ class Requirements:
         Raises:
             NotImplementedError: Must be implemented by subclasses.
         """
+        raise NotImplementedError
+
+    async def async_check(self, ctx: RPBACBuildContext):
+        """The async version of check method"""
         raise NotImplementedError
 
     def __and__(self, other):
@@ -92,6 +96,12 @@ class All(Requirements):
         for req in self.reqs:
             req.escalate(rpbac)
 
+    async def async_check(self, ctx: RPBACBuildContext):
+        for r in self.reqs:
+            await r.async_check(ctx)
+
+        return True
+
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}({', '.join(repr(r) for r in self.reqs)})"
 
@@ -140,6 +150,20 @@ class Any(Requirements):
         for req in self.reqs:
             req.escalate(rpbac)
 
+    async def async_check(self, ctx: RPBACBuildContext):
+        last_error = None
+
+        for r in self.reqs:
+            try:
+                await r.async_check(ctx)
+                return True
+
+            except RPBACError as e:
+                last_error = e
+
+        if last_error is not None:
+            raise last_error
+
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}({', '.join(repr(r) for r in self.reqs)})"
 
@@ -170,6 +194,17 @@ class Not(Requirements):
         """Escalates all child requirements."""
         for r in self.reqs:
             r.escalate(rpbac)
+
+    async def async_check(self, ctx: RPBACBuildContext):
+        for r in self.reqs:
+            try:
+                await r.async_check(ctx)
+            except RPBACError:
+                continue
+            else:
+                raise RPBACNegationError(requirement=r)
+
+        return True
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}({', '.join(repr(r) for r in self.reqs)})"
@@ -220,6 +255,9 @@ class Role(Requirements):
     def escalate(self, rpbac: RPBAC):
         """Escalate role loaders for this requirement."""
         rpbac._escalate_role_loaders()
+
+    async def async_check(self, ctx: RPBACBuildContext):
+        return self.check(ctx)
 
     @classmethod
     def identifier_from_kwargs(cls, kwarg_name: str) -> Predicate:
@@ -292,6 +330,9 @@ class Permission(Requirements):
         """Escalate permission loaders for this requirement."""
         rpbac._escalate_perm_loaders()
 
+    async def async_check(self, ctx: RPBACBuildContext):
+        return self.check(ctx)
+
     def __repr__(self) -> str:
         perm = ", ".join(repr(r) for r in self.permissions)
 
@@ -301,7 +342,11 @@ class Permission(Requirements):
 class Predicate(Requirements):
     """Requirements that checks a user-supplied callable against the route kwargs."""
 
-    def __init__(self, func: Callable[[RPBACBuildContext], bool]) -> None:
+    def __init__(
+        self,
+        func: Callable[[RPBACBuildContext], bool]
+        | Callable[[RPBACBuildContext], Awaitable[bool]],
+    ) -> None:
         self.func = func
 
     def check(self, ctx: RPBACBuildContext) -> bool:
@@ -316,6 +361,20 @@ class Predicate(Requirements):
 
     def escalate(self, rpbac: RPBAC):
         pass
+
+    async def async_check(self, ctx: RPBACBuildContext) -> bool:
+        from inspect import iscoroutinefunction
+
+        if iscoroutinefunction(self.func):
+            self.ctx = ctx
+            passed = await self.func(ctx)
+
+            if not passed:
+                raise RPBACPredicateError(func=self.func, ctx=self.ctx)
+
+            return True
+
+        return self.check(ctx)
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}({self.func.__name__}({inspect.signature(self.func)}))"
