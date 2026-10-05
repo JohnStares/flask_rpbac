@@ -81,7 +81,7 @@ can be written with ``All`` and ``Any`` when that is clearer for a larger requir
 
 .. code-block:: python
 
-   Permission("reports:view") & Role("suspended")
+   Not(Permission("reports:view") & Role("suspended"))
 
 The exact policy model remains an application decision. Flask-RPBAC does not require every project
 to represent authorization in the same way.
