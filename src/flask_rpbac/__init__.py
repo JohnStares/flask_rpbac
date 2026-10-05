@@ -205,7 +205,7 @@ class RPBAC:
                         else requirements
                     )
                     try:
-                        combined.check(ctx)
+                        await combined.async_check(ctx)
                     except RPBACError as e:
                         if self._rejection_hook is not None:
                             return self._rejection_hook(e)
@@ -431,7 +431,7 @@ class RPBAC:
                             ctx = await self._build_context_async(kwargs)
 
                             try:
-                                requirements.check(ctx)
+                                await requirements.async_check(ctx)
                             except RPBACError as e:
                                 if self._rejection_hook is not None:
                                     return self._rejection_hook(e)
