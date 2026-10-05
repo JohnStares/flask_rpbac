@@ -268,3 +268,101 @@ def test_cached_user_data_keeps_predicate_kwargs_request_specific(app, client):
     assert client.get("/posts/2").status_code == 200
     assert client.get("/posts/1").status_code == 403
     assert calls == {"identity": 2, "user_data": 1}
+
+
+def test_all_predicates_share_query_result_through_request_pstore(app, client):
+    rpbac = RPBAC(app)
+    query_calls = []
+
+    def load_record(ctx):
+        record_id = ctx.kwargs["record_id"]
+        query_calls.append(record_id)
+        ctx.pstore["record"] = {"id": record_id, "owner_id": 73}
+        return True
+
+    def verify_record_owner(ctx):
+        record = ctx.pstore["record"]
+        return record["id"] == ctx.kwargs["record_id"] and record["owner_id"] == 73
+
+    @app.get("/shared-all/<int:record_id>")
+    @rpbac.required(All(Predicate(load_record), Predicate(verify_record_owner)))
+    def shared_all(record_id):
+        return "allowed"
+
+    response = client.get("/shared-all/18")
+
+    assert response.status_code == 200
+    assert query_calls == [18]
+
+
+def test_any_predicates_share_stored_result_when_first_branch_denies(app, client):
+    rpbac = RPBAC(app)
+    query_calls = []
+
+    def load_record_for_fallback(ctx):
+        record_id = ctx.kwargs["record_id"]
+        query_calls.append(record_id)
+        ctx.pstore["record"] = {"id": record_id, "published": True}
+        # Deny this branch so Any evaluates the next predicate, using the query result.
+        return False
+
+    def is_published(ctx):
+        return ctx.pstore["record"]["published"]
+
+    @app.get("/shared-any/<int:record_id>")
+    @rpbac.required(Any(Predicate(load_record_for_fallback), Predicate(is_published)))
+    def shared_any(record_id):
+        return "published"
+
+    response = client.get("/shared-any/29")
+
+    assert response.status_code == 200
+    assert response.get_data(as_text=True) == "published"
+    assert query_calls == [29]
+
+
+@pytest.mark.parametrize("combinator", [All, Any])
+def test_predicate_reading_pstore_before_producer_raises_key_error(
+    app, client, combinator
+):
+    rpbac = RPBAC(app, raise_generic_error=True)
+
+    def consume_before_load(ctx):
+        return ctx.pstore["record"]["authorized"]
+
+    def load_record(ctx):
+        ctx.pstore["record"] = {"authorized": True}
+        return True
+
+    @app.get("/pstore-order/<int:record_id>")
+    @rpbac.required(combinator(Predicate(consume_before_load), Predicate(load_record)))
+    def pstore_order(record_id):
+        return "unreachable for this ordering"
+
+    with pytest.raises(KeyError, match="record"):
+        client.get("/pstore-order/3")
+
+
+def test_pstore_is_fresh_for_each_request(app, client):
+    rpbac = RPBAC(app)
+    observed_values = []
+
+    def store_request_value(ctx):
+        value = ctx.kwargs["value"]
+        ctx.pstore["value"] = value
+        observed_values.append(value)
+        return True
+
+    def verify_request_value(ctx):
+        return ctx.pstore["value"] == ctx.kwargs["value"]
+
+    @app.get("/pstore-isolation/<value>")
+    @rpbac.required(
+        All(Predicate(store_request_value), Predicate(verify_request_value))
+    )
+    def pstore_isolation(value):
+        return value
+
+    assert client.get("/pstore-isolation/first").get_data(as_text=True) == "first"
+    assert client.get("/pstore-isolation/second").get_data(as_text=True) == "second"
+    assert observed_values == ["first", "second"]
