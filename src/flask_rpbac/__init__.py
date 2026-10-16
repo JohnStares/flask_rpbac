@@ -4,7 +4,7 @@ import logging
 import warnings
 from collections.abc import Callable
 from functools import wraps
-from inspect import iscoroutinefunction
+from inspect import isawaitable, iscoroutinefunction
 from typing import TYPE_CHECKING
 
 from colorama import Fore, Style
@@ -531,6 +531,8 @@ class RPBAC:
         if self.__user_id is not None and self.cache is not None:
             user_id = self.__user_id()
 
+            self._reject_awaitable(user_id, "load_user_identity")
+
             ctx = self.cache.get(user_id)
 
             if ctx is not None:
@@ -543,6 +545,8 @@ class RPBAC:
 
         if self._user_role_perm_loader_callback is not None:
             data = self._user_role_perm_loader_callback()
+
+            self._reject_awaitable(data, "user_data_loader")
 
             roles = data["roles"]
             permissions = data["permissions"]
@@ -557,11 +561,15 @@ class RPBAC:
 
         if self._role_loader_callback is not None:
             roles = self._role_loader_callback()
+
+            self._reject_awaitable(roles, "role_loader")
         else:
             roles = None
 
         if self._permission_loader_callback is not None:
             permissions = self._permission_loader_callback()
+
+            self._reject_awaitable(permissions, "permission_loader")
         else:
             permissions = None
 
@@ -572,6 +580,20 @@ class RPBAC:
 
         g._rpbac_context = ctx
         return ctx
+
+    def _reject_awaitable(self, object: object, name: str) -> None:
+        """
+        Rejects an awaitable result.
+
+        Args:
+            object (object): Result gotten from a callback
+            name (str): Name of the callback
+        """
+        if isawaitable(object):
+            raise TypeError(
+                f"{name} callback must not return an awaitable "
+                f"on a synchronous route. Make {name} synchronous."
+            )
 
     async def _build_context_async(self, kwargs: dict | None = None):
         """
