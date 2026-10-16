@@ -1,3 +1,6 @@
+import gc
+import warnings
+
 import pytest
 from flask import Blueprint, Flask
 
@@ -337,6 +340,73 @@ def test_async_predicate_receives_context_and_is_awaited(app, client):
     assert response.get_json() == {"post_id": 42}
     assert len(predicate_calls) == 1
     assert predicate_calls[0].kwargs == {"post_id": 42}
+
+
+def test_sync_route_rejects_async_predicate_with_type_error(app, client):
+    rpbac = RPBAC(app)
+
+    async def async_predicate(ctx):
+        return True
+
+    @app.get("/sync-route-async-predicate")
+    @rpbac.required(Predicate(async_predicate))
+    def sync_route():
+        return "unreachable"
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        with pytest.raises(TypeError, match="Predicate callback must return a bool"):
+            client.get("/sync-route-async-predicate")
+        gc.collect()
+
+
+@pytest.mark.parametrize(
+    ("callback_name", "callback_result", "requirement"),
+    [
+        ("load_user_identity", "user-1", Role("admin")),
+        (
+            "user_data_loader",
+            {"roles": ["admin"], "permissions": []},
+            Role("admin"),
+        ),
+        ("role_loader", ["admin"], Role("admin")),
+        ("permission_loader", ["post:read"], Permission("post:read")),
+    ],
+)
+def test_sync_route_rejects_async_context_callback_results(
+    app, client, callback_name, callback_result, requirement
+):
+    cache_config = (
+        {"cache_config": {"type": "memory"}}
+        if callback_name == "load_user_identity"
+        else {}
+    )
+    rpbac = RPBAC(app, **cache_config)
+
+    async def callback():
+        return callback_result
+
+    getattr(rpbac, callback_name)(callback)
+
+    if callback_name == "load_user_identity":
+
+        @rpbac.role_loader
+        def load_roles():
+            return ["admin"]
+
+    @app.get(f"/sync-route-awaitable-{callback_name}")
+    @rpbac.required(requirement)
+    def sync_route():
+        return "unreachable"
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        with pytest.raises(
+            TypeError,
+            match=f"{callback_name} callback must not return an awaitable",
+        ):
+            client.get(f"/sync-route-awaitable-{callback_name}")
+        gc.collect()
 
 
 @pytest.mark.parametrize("predicate_result", [False, None, 0, ""])
