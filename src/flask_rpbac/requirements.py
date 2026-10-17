@@ -357,6 +357,12 @@ class Predicate(Requirements):
         if not passed:
             raise RPBACPredicateError(func=self.func, ctx=self.ctx)
 
+        if inspect.isawaitable(passed):
+            raise TypeError(
+                "Predicate callback must return a bool not an awaitable "
+                "on a synchronous route. Make predicate synchronous."
+            )
+
         return True
 
     def escalate(self, rpbac: RPBAC):
