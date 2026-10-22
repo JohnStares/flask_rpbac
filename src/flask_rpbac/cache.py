@@ -169,7 +169,10 @@ class RedisCache:
                 from . import RPBACBuildContext
 
                 return RPBACBuildContext(**json.loads(data))
-            except (json.JSONDecodeError, TypeError, ValueError):
+            except (json.JSONDecodeError, TypeError, ValueError) as e:
+                logger.error(
+                    f"{Fore.RED}RPBACBuildContext DecodingError: {e}{Style.RESET_ALL}"
+                )
                 self.delete(key)
 
         return None
