@@ -679,6 +679,7 @@ class RPBAC:
             },
             "All": All,
             "Any": Any,
+            "Not": Not,
             "Role": Role,
             "Permission": Permission,
         }
