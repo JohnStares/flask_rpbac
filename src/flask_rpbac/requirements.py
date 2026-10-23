@@ -227,7 +227,7 @@ class Role(Requirements):
                   "all": User needs all of the roles.
         """
         if match not in self._VALID_MATCHES:
-            raise ValueError(f"match must be of 'any' or 'all', but got {match}")
+            raise ValueError(f"match must be of 'any' or 'all', but got {match!r}")
 
         self.roles = roles
         self.match = match
@@ -303,7 +303,7 @@ class Permission(Requirements):
         """
 
         if match not in self._VALID_MATCHES:
-            raise ValueError(f"match must be of 'any' or 'all', but got {match}")
+            raise ValueError(f"match must be of 'any' or 'all', but got {match!r}")
 
         self.permissions = permissions
         self.match = match
