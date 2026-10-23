@@ -1,5 +1,5 @@
 import pytest
-from flask import Flask
+from flask import Flask, render_template_string
 
 from src.flask_rpbac import RPBAC, All, Any, Not, Permission, Role
 from src.flask_rpbac.exc import RPBACError, RPBACPermissionError, RPBACRoleError
@@ -287,6 +287,33 @@ def test_combined_requirements_and_match_modes_work_in_real_routes(app, client):
 
     assert client.get("/all-match").status_code == 200
     assert client.get("/any-match").status_code == 200
+
+
+@pytest.mark.parametrize("invalid_match", ["", "ANY", "Any", "none", None, 1, []])
+def test_role_rejects_invalid_match_values(invalid_match):
+    with pytest.raises(ValueError, match="match must be of 'any' or 'all'"):
+        Role("admin", match=invalid_match)
+
+
+@pytest.mark.parametrize("invalid_match", ["", "ALL", "All", "none", None, 1, []])
+def test_permission_rejects_invalid_match_values(invalid_match):
+    with pytest.raises(ValueError, match="match must be of 'any' or 'all'"):
+        Permission("post:read", match=invalid_match)
+
+
+def test_not_requirement_is_available_and_evaluated_in_jinja_templates(app):
+    rpbac = RPBAC(app)
+
+    @rpbac.role_loader
+    def load_roles():
+        return ["reader"]
+
+    with app.app_context():
+        rendered = render_template_string(
+            "{% if rpbac.can(Not(Role('admin'))) %}allowed{% else %}denied{% endif %}"
+        )
+
+    assert rendered == "allowed"
 
 
 def test_empty_role_or_permission_sets_fail_gracefully(app, client):
