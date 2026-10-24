@@ -74,6 +74,12 @@ class All(Requirements):
         Args:
             *reqs (Requirements): Variable number of Requirements objects to combine.
         """
+
+        if not reqs:
+            raise ValueError(
+                f"{self.__class__.__name__}() requires at least one requirement."
+            )
+
         self.reqs = reqs
 
     def check(self, ctx):
@@ -120,6 +126,12 @@ class Any(Requirements):
         Args:
             *reqs (Requirements): Variable number of Requirements objects to combine.
         """
+
+        if not reqs:
+            raise ValueError(
+                f"{self.__class__.__name__}() requires at least one requirement."
+            )
+
         self.reqs = reqs
 
     def check(self, ctx):
@@ -178,6 +190,12 @@ class Not(Requirements):
 
     def __init__(self, *reqs: Requirements):
         """Initialize with multiple requirements"""
+
+        if not reqs:
+            raise ValueError(
+                f"{self.__class__.__name__}() requires at least one requirement."
+            )
+
         self.reqs = reqs
 
     def check(self, ctx):
@@ -226,6 +244,10 @@ class Role(Requirements):
                   "any": User needs at least one of the roles.
                   "all": User needs all of the roles.
         """
+
+        if not roles:
+            raise ValueError(f"{self.__class__.__name__}() requires at least one role.")
+
         if match not in self._VALID_MATCHES:
             raise ValueError(f"match must be of 'any' or 'all', but got {match!r}")
 
@@ -301,6 +323,11 @@ class Permission(Requirements):
                   "all": User needs all of the permissions.
                   "any": User needs at least one of the permissions.
         """
+
+        if not permissions:
+            raise ValueError(
+                f"{self.__class__.__name__}() requires at least one permission."
+            )
 
         if match not in self._VALID_MATCHES:
             raise ValueError(f"match must be of 'any' or 'all', but got {match!r}")
