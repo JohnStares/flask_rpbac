@@ -24,6 +24,16 @@ def client(app):
     return app.test_client()
 
 
+@pytest.mark.parametrize(
+    "requirement",
+    [All, Not, Any, Role, Permission],
+    ids=["all", "not", "any", "role", "permission"],
+)
+def test_requirements_reject_empty_initialization(requirement):
+    with pytest.raises(ValueError):
+        requirement()
+
+
 def test_not_allows_endpoint_when_role_or_permission_is_missing(app, client):
     rpbac = RPBAC(app)
 
@@ -130,18 +140,15 @@ def test_not_inverts_predicate_boolean_result(app, client):
     assert response.get_data(as_text=True) == "allowed"
 
 
-def test_empty_not_allows_endpoint_without_loaders(app, client):
+def test_empty_not_raises_when_decorating_endpoint_without_loaders(app):
     rpbac = RPBAC(app)
 
-    @app.route("/empty-not")
-    @rpbac.required(Not())
-    def empty_not():
-        return "allowed"
+    with pytest.raises(ValueError, match=r"Not\(\) requires at least one requirement"):
 
-    response = client.get("/empty-not")
-
-    assert response.status_code == 200
-    assert response.get_data(as_text=True) == "allowed"
+        @app.route("/empty-not")
+        @rpbac.required(Not())
+        def empty_not():
+            return "allowed"
 
 
 def test_not_composes_with_all_and_any_on_endpoints(app, client):

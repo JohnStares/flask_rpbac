@@ -4,7 +4,6 @@ import logging
 import sys
 
 import pytest
-from colorama import Fore
 from flask import Flask, g
 
 from src.flask_rpbac import RPBAC, Permission, Predicate, Role
@@ -607,7 +606,6 @@ def test_invalidate_cache_without_configured_cache_logs_red_error_and_continues(
         if "Cache is not configured." in record.message
     ]
     assert len(error_records) == 1
-    assert Fore.RED in error_records[0].message
 
 
 def test_redis_cache_malformed_payload_is_deleted_and_reloaded(app):

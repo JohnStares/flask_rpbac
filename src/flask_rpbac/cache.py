@@ -159,7 +159,7 @@ class RedisCache:
         try:
             data = self.__client.get(self.__key(key))
         except self._redis.RedisError as e:
-            logger.error(f"{Fore.RED}Redis Error: {e}{Style.RESET_ALL}")
+            logger.error("Redis Error: %s", e)
             self._on_failure()
 
             return None
@@ -169,7 +169,8 @@ class RedisCache:
                 from . import RPBACBuildContext
 
                 return RPBACBuildContext(**json.loads(data))
-            except (json.JSONDecodeError, TypeError, ValueError):
+            except (json.JSONDecodeError, TypeError, ValueError) as e:
+                logger.error("RPBACBuildContext DecodingError: %s", e)
                 self.delete(key)
 
         return None
@@ -196,7 +197,7 @@ class RedisCache:
         try:
             self.__client.set(self.__key(key), _value, ex=self.ttl)
         except self._redis.RedisError as e:
-            logger.error(f"{Fore.RED}Redis Error: {e}{Style.RESET_ALL}")
+            logger.error("Redis Error: %s", e)
             self._on_failure()
 
             return
@@ -214,7 +215,7 @@ class RedisCache:
         try:
             self.__client.delete(self.__key(key))
         except self._redis.RedisError as e:
-            logger.error(f"{Fore.RED}Redis Error: {e}{Style.RESET_ALL}")
+            logger.error("Redis Error: %s", e)
             self._on_failure()
 
             return
@@ -232,7 +233,7 @@ class RedisCache:
                 self.delete(key)
 
         except self._redis.RedisError as e:
-            logger.error(f"{Fore.RED}Redis Error: {e}{Style.RESET_ALL}")
+            logger.error("Redis Error: %s", e)
             self._on_failure()
 
             return
@@ -281,9 +282,7 @@ class RedisCache:
             target=self._reconnection_loop, name="RedisCache-reconnect", daemon=True
         )
 
-        logger.info(
-            f"{Fore.CYAN}INFO: Redis starts reconnection loop.{Style.RESET_ALL}"
-        )
+        logger.info("Redis starts reconnection loop.")
         self._ping_thread = t
         t.start()
 
@@ -295,7 +294,7 @@ class RedisCache:
                     self._is_healthy = True
                     self._is_reconnecting = False
 
-                logger.info(f"{Fore.GREEN}INFO: Redis is reconnected.{Style.RESET_ALL}")
+                logger.info(" Redis is reconnected.")
                 return
 
             self._stop.wait(self._reconnection_interval)

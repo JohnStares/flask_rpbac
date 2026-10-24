@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import inspect
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, ClassVar, Literal
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -22,6 +22,8 @@ class Requirements:
     Base class for all requirement types in the RBAC system.
     Provides operator overloading for combining requirements using AND (&) and OR (|) logic.
     """
+
+    _VALID_MATCHES: ClassVar[list[str]] = ["any", "all"]
 
     def check(self, ctx):
         """Check if the requirement passes for the given context.
@@ -72,6 +74,12 @@ class All(Requirements):
         Args:
             *reqs (Requirements): Variable number of Requirements objects to combine.
         """
+
+        if not reqs:
+            raise ValueError(
+                f"{self.__class__.__name__}() requires at least one requirement."
+            )
+
         self.reqs = reqs
 
     def check(self, ctx):
@@ -118,6 +126,12 @@ class Any(Requirements):
         Args:
             *reqs (Requirements): Variable number of Requirements objects to combine.
         """
+
+        if not reqs:
+            raise ValueError(
+                f"{self.__class__.__name__}() requires at least one requirement."
+            )
+
         self.reqs = reqs
 
     def check(self, ctx):
@@ -176,6 +190,12 @@ class Not(Requirements):
 
     def __init__(self, *reqs: Requirements):
         """Initialize with multiple requirements"""
+
+        if not reqs:
+            raise ValueError(
+                f"{self.__class__.__name__}() requires at least one requirement."
+            )
+
         self.reqs = reqs
 
     def check(self, ctx):
@@ -215,7 +235,7 @@ class Role(Requirements):
     Supports checking for 'any' of the listed roles or 'all' of them.
     """
 
-    def __init__(self, *roles: str, match: str = "any") -> None:
+    def __init__(self, *roles: str, match: Literal["any", "all"] = "any") -> None:
         """Initialize with role requirements.
 
         Args:
@@ -224,6 +244,13 @@ class Role(Requirements):
                   "any": User needs at least one of the roles.
                   "all": User needs all of the roles.
         """
+
+        if not roles:
+            raise ValueError(f"{self.__class__.__name__}() requires at least one role.")
+
+        if match not in self._VALID_MATCHES:
+            raise ValueError(f"match must be of 'any' or 'all', but got {match!r}")
+
         self.roles = roles
         self.match = match
 
@@ -287,7 +314,7 @@ class Permission(Requirements):
     Supports checking for 'all' of the listed permissions or 'any' of them.
     """
 
-    def __init__(self, *permissions: str, match: str = "all") -> None:
+    def __init__(self, *permissions: str, match: Literal["all", "any"] = "all") -> None:
         """Initialize with permission requirements.
 
         Args:
@@ -296,6 +323,15 @@ class Permission(Requirements):
                   "all": User needs all of the permissions.
                   "any": User needs at least one of the permissions.
         """
+
+        if not permissions:
+            raise ValueError(
+                f"{self.__class__.__name__}() requires at least one permission."
+            )
+
+        if match not in self._VALID_MATCHES:
+            raise ValueError(f"match must be of 'any' or 'all', but got {match!r}")
+
         self.permissions = permissions
         self.match = match
 

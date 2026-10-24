@@ -7,7 +7,6 @@ from functools import wraps
 from inspect import isawaitable, iscoroutinefunction
 from typing import TYPE_CHECKING
 
-from colorama import Fore, Style
 from flask import g, jsonify, request
 
 if TYPE_CHECKING:
@@ -421,9 +420,7 @@ class RPBAC:
 
             return
 
-        logger.error(
-            f"{Fore.RED}Redis Error: Cache is not configured.{Style.RESET_ALL}"
-        )
+        logger.error("Redis Error: Cache is not configured.")
 
     def protect_blueprint(self, blueprint: Blueprint, requirements: Requirements):
         """
@@ -679,6 +676,7 @@ class RPBAC:
             },
             "All": All,
             "Any": Any,
+            "Not": Not,
             "Role": Role,
             "Permission": Permission,
         }
